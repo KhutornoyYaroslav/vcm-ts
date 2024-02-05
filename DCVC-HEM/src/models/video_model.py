@@ -378,22 +378,23 @@ class DMC(CompressionModel):
         if output_path is not None:
             mv_y_q_scale, mv_y_q_index = get_rounded_q(mv_y_q_scale)
             y_q_scale, y_q_index = get_rounded_q(y_q_scale)
-
+            t0 = time.time()
             encoded = self.compress(x, dpb,
                                     mv_y_q_scale, y_q_scale)
             encode_p(encoded['bit_stream'], mv_y_q_index, y_q_index, output_path)
             bits = filesize(output_path) * 8
+            t1 = time.time()
             mv_y_q_index, y_q_index, string = decode_p(output_path)
 
-            start = time.time()
             decoded = self.decompress(dpb, string,
                                       pic_height, pic_width,
                                       mv_y_q_index / 100, y_q_index / 100)
-            decoding_time = time.time() - start
+            t2 = time.time()
             result = {
                 "dpb": decoded["dpb"],
                 "bit": bits,
-                "decoding_time": decoding_time,
+                "encoding_time": t1 - t0,
+                "decoding_time": t2 - t1
             }
             return result
 

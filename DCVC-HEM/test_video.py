@@ -95,6 +95,7 @@ def run_test(video_net, i_frame_net, args, device):
 
     start_time = time.time()
     p_frame_number = 0
+    overall_p_encoding_time = 0
     overall_p_decoding_time = 0
     with torch.no_grad():
         for frame_idx in range(frame_num):
@@ -144,6 +145,7 @@ def run_test(video_net, i_frame_net, args, device):
                 frame_types.append(1)
                 bits.append(result['bit'])
                 p_frame_number += 1
+                overall_p_encoding_time += result['encoding_time']
                 overall_p_decoding_time += result['decoding_time']
 
             recon_frame = recon_frame.clamp_(0, 1)
@@ -164,8 +166,9 @@ def run_test(video_net, i_frame_net, args, device):
 
     test_time = time.time() - start_time
     if verbose >= 1 and p_frame_number > 0:
-        print(f"decoding {p_frame_number} P frames, "
-              f"average {overall_p_decoding_time/p_frame_number * 1000:.0f} ms.")
+        print(f"encoding/decoding {p_frame_number} P frames, "
+              f"average encoding time {overall_p_encoding_time / p_frame_number * 1000:.0f} ms, "
+              f"average decoding time {overall_p_decoding_time / p_frame_number * 1000:.0f} ms.")
 
     log_result = generate_log_json(frame_num, frame_types, bits, psnrs, msssims,
                                    frame_pixel_num, test_time)
