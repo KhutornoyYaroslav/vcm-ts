@@ -1,0 +1,3 @@
+[submodule "DCVC"]
+	path = DCVC
+	url = https://github.com/microsoft/DCVC/
