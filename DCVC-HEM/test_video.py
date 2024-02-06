@@ -84,6 +84,7 @@ def run_test(video_net, i_frame_net, args, device):
     save_decoded_frame = 'save_decoded_frame' in args and args['save_decoded_frame']
     verbose = args['verbose'] if 'verbose' in args else 0
 
+    # Инициализация читателя изображений
     if args['src_type'] == 'png':
         src_reader = PNGReader(args['img_path'], args['src_width'], args['src_height'])
 
@@ -97,8 +98,9 @@ def run_test(video_net, i_frame_net, args, device):
     p_frame_number = 0
     overall_p_encoding_time = 0
     overall_p_decoding_time = 0
-    with torch.no_grad():
+    with torch.no_grad():  # no_grad() - не перезаписывает веса
         for frame_idx in range(frame_num):
+            # Считывание кадра из видео и перенос его на GPU
             frame_start_time = time.time()
             rgb = src_reader.read_one_frame(src_format="rgb")
             x = np_image_to_tensor(rgb)
@@ -111,6 +113,7 @@ def run_test(video_net, i_frame_net, args, device):
             else:
                 assert frame_pixel_num == x.shape[2] * x.shape[3]
 
+            # Добавление паддингов на изображение (по дефолту используется 64 пикселя)
             # pad if necessary
             padding_l, padding_r, padding_t, padding_b = get_padding_size(pic_height, pic_width)
             x_padded = torch.nn.functional.pad(
@@ -123,6 +126,8 @@ def run_test(video_net, i_frame_net, args, device):
             bin_path = os.path.join(args['bin_folder'], f"{frame_idx}.bin") \
                 if write_stream else None
 
+            # Кодирование и декодирование кадра при помощи i_frame_net, когда номер кадра в GOP равен 0 (первый),
+            # или при помощи video_net
             if frame_idx % gop_size == 0:
                 result = i_frame_net.encode_decode(x_padded, args['i_frame_q_scale'], bin_path,
                                                    pic_height=pic_height, pic_width=pic_width)
@@ -148,6 +153,7 @@ def run_test(video_net, i_frame_net, args, device):
                 overall_p_encoding_time += result['encoding_time']
                 overall_p_decoding_time += result['decoding_time']
 
+            # Удаление паддингов и подсчёт метрик
             recon_frame = recon_frame.clamp_(0, 1)
             x_hat = F.pad(recon_frame, (-padding_l, -padding_r, -padding_t, -padding_b))
             psnr = PSNR(x_hat, x)
@@ -176,12 +182,14 @@ def run_test(video_net, i_frame_net, args, device):
 
 
 def encode_one(args, device):
+    # Загрузка весов модели для изображений и её дальнейшая инициализация
     i_state_dict = get_state_dict(args['i_frame_model_path'])
     i_frame_net = IntraNoAR()
     i_frame_net.load_state_dict(i_state_dict)
     i_frame_net = i_frame_net.to(device)
     i_frame_net.eval()
 
+    # Загрузка весов модели для видео и её дальнейшая инициализация
     if args['force_intra']:
         video_net = None
     else:
@@ -191,11 +199,13 @@ def encode_one(args, device):
         video_net = video_net.to(device)
         video_net.eval()
 
+    # Подготовка моделей к записи битстрима в бинарные файлы на диск (инициализация арифметических энкодеров)
     if args['write_stream']:
         if video_net is not None:
             video_net.update(force=True)
         i_frame_net.update(force=True)
 
+    # Подготовка аргументов для нейронки
     sub_dir_name = args['video_path']
     gop_size = args['gop']
     frame_num = args['frame_num']
@@ -273,7 +283,11 @@ def main():
     count_frames = 0
     count_sequences = 0
 
+    # Задаётся количество используемых при тестировании значений q_scale (min = 2, max = 64)
     rate_num = args.rate_num
+    # Извлекает из весов используемые значения q_scale (в весах доступны q_basic и q_scale) и на основе заданных
+    # аргументов либо использует значения из весов, либо заданные вручную, либо интерполирует N значений в заданном
+    # промежутке (минимальное и максимальное значения берутся из весов)
     i_frame_q_scales = IntraNoAR.get_q_scales_from_ckpt(args.i_frame_model_path)
     print("q_scales in intra ckpt: ", end='')
     for q in i_frame_q_scales:
@@ -295,6 +309,7 @@ def main():
         print(f"{q:.3f}, ", end='')
     print()
 
+    # Аналогично извлекаются из весов для видео значения y_q_scale (резидуалы) и mv_q_scale (motion vector)
     if not args.force_intra:
         p_frame_y_q_scales, p_frame_mv_y_q_scales = DMC.get_q_scales_from_ckpt(args.model_path)
         print("y_q_scales in inter ckpt: ", end='')
@@ -330,6 +345,7 @@ def main():
             print(f"{q:.3f}, ", end='')
         print()
 
+    # Подготовка аргументов для самой нейронки
     root_path = args.force_root_path if args.force_root_path is not None else config['root_path']
     config = config['test_classes']
     for ds_name in config:

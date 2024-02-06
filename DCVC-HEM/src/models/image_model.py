@@ -51,21 +51,29 @@ class IntraNoAR(CompressionModel):
         return q_basic * q_scale
 
     def forward(self, x, q_scale=None):
+        # Генерирует q (quantization) для всех 192 каналов
         curr_q = self.get_curr_q(q_scale)
 
+        # Кодирует входное изображение и квантизирует его
         y = self.enc(x)
         y = y / curr_q
+        # Полученное закодированное изображение прогоняется через гиперэнкодер, после чего квантизируется, чтобы
+        # получить параметры энтропии для арифметического энкодера и декодера
         z = self.hyper_enc(y)
         z_hat = self.quant(z)
 
         params = self.hyper_dec(z_hat)
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
+        # Прогон через арифметический энкодер, который на выходе возвращает закодированное изображение (в исходной
+        # статье рисунок 2)
         y_res, y_q, y_hat, scales_hat = self.forward_dual_prior(
             y, means, scales, q_step, self.y_spatial_prior)
 
+        # Декодирование в выходное изображение
         y_hat = y_hat * curr_q
         x_hat = self.refine(self.dec(y_hat))
 
+        # Подсчёт метрик (при обучении накладывается шум)
         if self.training:
             y_for_bit = self.add_noise(y_res)
             z_for_bit = self.add_noise(z)
@@ -110,13 +118,18 @@ class IntraNoAR(CompressionModel):
 
         assert pic_height is not None
         assert pic_width is not None
+        # Округление q_scale до 2 знаков (q_index = q_scale * 100)
         q_scale, q_index = get_rounded_q(q_scale)
+        # Сжатие исходного изображения в битстрим
         compressed = self.compress(x, q_scale)
         bit_stream = compressed['bit_stream']
+        # Запись битстрима в бинарный файл на диске
         encode_i(pic_height, pic_width, q_index, bit_stream, output_path)
         bit = filesize(output_path) * 8
 
+        # Чтение битстрима из бинарного файла
         height, width, q_index, bit_stream = decode_i(output_path)
+        # Декомпрессия битстрима в выходное изображение
         decompressed = self.decompress(bit_stream, height, width, q_index / 100)
         x_hat = decompressed['x_hat']
 
@@ -127,19 +140,25 @@ class IntraNoAR(CompressionModel):
         return result
 
     def compress(self, x, q_scale):
+        # Генерирует q (quantization) для всех 192 каналов
         curr_q = self.get_curr_q(q_scale)
 
+        # Кодирует входное изображение и квантизирует его
         y = self.enc(x)
         y = y / curr_q
+        # Полученное закодированное изображение прогоняется через гиперэнкодер, после чего квантизируется, чтобы
+        # получить параметры энтропии для арифметического энкодера и декодера
         z = self.hyper_enc(y)
         z_hat = torch.round(z)
 
         params = self.hyper_dec(z_hat)
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
+        # Получение разделённых на 2 канала q и scales???
         y_q_w_0, y_q_w_1, scales_w_0, scales_w_1, y_hat = self.compress_dual_prior(
             y, means, scales, q_step, self.y_spatial_prior)
         y_hat = y_hat * curr_q
 
+        # Кодирование при помощи арифметического энкодера преобразованного изображения в битстрим
         self.entropy_coder.reset_encoder()
         _ = self.bit_estimator_z.encode(z_hat)
         _ = self.gaussian_encoder.encode(y_q_w_0, scales_w_0)
@@ -152,18 +171,24 @@ class IntraNoAR(CompressionModel):
         return result
 
     def decompress(self, bit_stream, height, width, q_scale):
+        # Генерирует q (quantization) для всех 192 каналов
         curr_q = self.get_curr_q(q_scale)
 
+        # Декодирование битстрима в тензор, в котором хранятся параметры энтропии для арифметического декодера
+        # (размерность 1х192х17х30)
         self.entropy_coder.set_stream(bit_stream)
         device = next(self.parameters()).device
         z_size = get_downsampled_shape(height, width, 64)
         z_hat = self.bit_estimator_z.decode_stream(z_size)
         z_hat = z_hat.to(device)
 
+        # Получение параметров для энтропии
         params = self.hyper_dec(z_hat)
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
+        # Получение закодированного изображения после декодирования арифметическим энкодером
         y_hat = self.decompress_dual_prior(means, scales, q_step, self.y_spatial_prior)
 
+        # Декодирование в выходное изображение
         y_hat = y_hat * curr_q
         x_hat = self.refine(self.dec(y_hat)).clamp_(0, 1)
         return {"x_hat": x_hat}

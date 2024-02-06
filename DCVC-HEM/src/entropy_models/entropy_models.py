@@ -225,9 +225,9 @@ class GaussianEncoder():
         if self.entropy_coder is not None and not force:
             return
         self.entropy_coder = entropy_coder
-        self.cdf_helper = CdfHelper()
+        self.cdf_helper = CdfHelper()  # CDF - Cumulative Distribution Function (функция распределения)
 
-        pmf_center = torch.zeros_like(self.scale_table) + 50
+        pmf_center = torch.zeros_like(self.scale_table) + 50  # PMF - Probability Mass Function (функция вероятности)
         scales = torch.zeros_like(pmf_center) + self.scale_table
         mu = torch.zeros_like(scales)
         cdf_distribution = self.cdf_distribution(mu, scales)
