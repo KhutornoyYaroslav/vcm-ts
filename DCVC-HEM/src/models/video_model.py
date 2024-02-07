@@ -231,10 +231,14 @@ class DMC(CompressionModel):
         return self.feature_extractor(feature)
 
     def motion_compensation(self, dpb, mv):
+        # Получение нового кадра на основе предыдущего и оптического потока (деформация пикселей)
         warpframe = flow_warp(dpb["ref_frame"], mv)
+        # Понижение разрешения исходного оптического потока в 2 и 4 раза
         mv2 = bilineardownsacling(mv) / 2
         mv3 = bilineardownsacling(mv2) / 2
+        # Получение особенностей из предыдущего кадра из 3 слоёв нейронки
         ref_feature1, ref_feature2, ref_feature3 = self.multi_scale_feature_extractor(dpb)
+        # Получение контекстов на основе особенностей и оптических потоков как оригинальных, так и сжатых в 2/4 раза
         context1 = flow_warp(ref_feature1, mv)
         context2 = flow_warp(ref_feature2, mv2)
         context3 = flow_warp(ref_feature3, mv3)
@@ -259,46 +263,64 @@ class DMC(CompressionModel):
     def compress(self, x, dpb, mv_y_q_scale, y_q_scale):
         # pic_width and pic_height may be different from x's size. x here is after padding
         # x_hat has the same size with x
+        # Генерирует q (quantization) для всех каналов как для изображения (96), так и для motion vector (64)
+        # Это реализация верхней части схемы из рисунка 1 статьи (MV Encoding & Decoding)
         curr_mv_y_q = self.get_curr_mv_y_q(mv_y_q_scale)
         curr_y_q = self.get_curr_y_q(y_q_scale)
 
+        # Получение оптического потока на основе предыдущего кадра (восстановленного) и нынешнего (оригинального)
         est_mv = self.optic_flow(x, dpb["ref_frame"])
+        # Кодирование оптического потока и его квантизация
         mv_y = self.mv_encoder(est_mv)
         mv_y = mv_y / curr_mv_y_q
+        # Полученный закодированный оптический поток прогоняется через гиперэнкодер, после чего квантизируется, чтобы
+        # получить параметры энтропии для арифметического энкодера и декодера
         mv_z = self.mv_hyper_prior_encoder(mv_y)
         mv_z_hat = torch.round(mv_z)
         mv_params = self.mv_hyper_prior_decoder(mv_z_hat)
         ref_mv_y = dpb["ref_mv_y"]
         if ref_mv_y is None:
             ref_mv_y = torch.zeros_like(mv_y)
+        # Объединение параметров энтропии с оптическим потоком предыдущего кадра???
         mv_params = torch.cat((mv_params, ref_mv_y), dim=1)
         mv_q_step, mv_scales, mv_means = self.mv_y_prior_fusion(mv_params).chunk(3, 1)
+        # Кодирование оптического потока арифметическим энкодером
         mv_y_q_w_0, mv_y_q_w_1, mv_scales_w_0, mv_scales_w_1, mv_y_hat = self.compress_dual_prior(
             mv_y, mv_means, mv_scales, mv_q_step, self.mv_y_spatial_prior)
         mv_y_hat = mv_y_hat * curr_mv_y_q
 
+        # Декодирование оптического потока
         mv_hat = self.mv_decoder(mv_y_hat)
+        # Получение контекстов для дальнейшего кодирования изображения и его реконструкции
         context1, context2, context3, _ = self.motion_compensation(dpb, mv_hat)
 
+        # Кодирование исходного изображения при помощи контекстов и его квантизация
         y = self.contextual_encoder(x, context1, context2, context3)
         y = y / curr_y_q
+        # Полученное закодированное изображение прогоняется через гиперэнкодер, после чего квантизируется, чтобы
+        # получить параметры энтропии для арифметического энкодера и декодера
         z = self.contextual_hyper_prior_encoder(y)
         z_hat = torch.round(z)
+        # Получение параметров из контекстуального и временного гиперприоров
         hierarchical_params = self.contextual_hyper_prior_decoder(z_hat)
         temporal_params = self.temporal_prior_encoder(context3)
         ref_y = dpb["ref_y"]
         if ref_y is None:
             ref_y = torch.zeros_like(y)
+        # Объединение параметров с закодированным предыдущим изображением (в рамках работы с video_net)
         params = torch.cat((temporal_params, hierarchical_params, ref_y), dim=1)
 
+        # Кодирование изображения арифметическим энкодером
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
         y_q_w_0, y_q_w_1, scales_w_0, scales_w_1, y_hat = self.compress_dual_prior(
             y, means, scales, q_step, self.y_spatial_prior)
         y_hat = y_hat * curr_y_q
 
+        # Декодирование особенностей изображения и самого изображения
         recon_image_feature = self.contextual_decoder(y_hat, context2, context3)
         feature, x_hat = self.recon_generation_net(recon_image_feature, context1)
 
+        # Кодирование при помощи арифметического энкодера преобразованного оптического потока и изображения в битстрим
         self.entropy_coder.reset_encoder()
         _ = self.bit_estimator_z_mv.encode(mv_z_hat)
         _ = self.gaussian_encoder.encode(mv_y_q_w_0, mv_scales_w_0)
@@ -321,14 +343,17 @@ class DMC(CompressionModel):
 
     def decompress(self, dpb, string, height, width,
                    mv_y_q_scale, y_q_scale):
+        # Генерирует q (quantization) для всех каналов как для изображения (96), так и для motion vector (64)
         curr_mv_y_q = self.get_curr_mv_y_q(mv_y_q_scale)
         curr_y_q = self.get_curr_y_q(y_q_scale)
 
+        # Декодирование битстрима в параметры оптического потока
         self.entropy_coder.set_stream(string)
         device = next(self.parameters()).device
         mv_z_size = get_downsampled_shape(height, width, 64)
         mv_z_hat = self.bit_estimator_z_mv.decode_stream(mv_z_size)
         mv_z_hat = mv_z_hat.to(device)
+        # Получение параметров для энтропии оптического потока
         mv_params = self.mv_hyper_prior_decoder(mv_z_hat)
         ref_mv_y = dpb["ref_mv_y"]
         if ref_mv_y is None:
@@ -336,13 +361,17 @@ class DMC(CompressionModel):
             ref_mv_y = torch.zeros((1, C // 2, H, W), device=mv_params.device)
         mv_params = torch.cat((mv_params, ref_mv_y), dim=1)
         mv_q_step, mv_scales, mv_means = self.mv_y_prior_fusion(mv_params).chunk(3, 1)
+        # Получение закодированного оптического потока после декодирования арифметическим энкодером
         mv_y_hat = self.decompress_dual_prior(mv_means, mv_scales, mv_q_step,
                                               self.mv_y_spatial_prior)
         mv_y_hat = mv_y_hat * curr_mv_y_q
 
+        # Декодирование в оптический поток
         mv_hat = self.mv_decoder(mv_y_hat)
+        # Получение контекстов для дальнейшего кодирования изображения и его реконструкции
         context1, context2, context3, _ = self.motion_compensation(dpb, mv_hat)
 
+        # Декодирование параметров из контекстуального и временного гиперприоров
         z_size = get_downsampled_shape(height, width, 64)
         z_hat = self.bit_estimator_z.decode_stream(z_size)
         z_hat = z_hat.to(device)
@@ -352,11 +381,14 @@ class DMC(CompressionModel):
         if ref_y is None:
             _, C, H, W = temporal_params.size()
             ref_y = torch.zeros((1, C // 2, H, W), device=temporal_params.device)
+        # Получение параметров для энтропии изображения путём объединения из контекстуального и временного гиперприоров
         params = torch.cat((temporal_params, hierarchical_params, ref_y), dim=1)
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
+        # Получение закодированного изображения после декодирования арифметическим энкодером
         y_hat = self.decompress_dual_prior(means, scales, q_step, self.y_spatial_prior)
         y_hat = y_hat * curr_y_q
 
+        # Реконструкция изображения и его особенностей при помощи контекстуального декодера
         recon_image_feature = self.contextual_decoder(y_hat, context2, context3)
         feature, recon_image = self.recon_generation_net(recon_image_feature, context1)
         recon_image = recon_image.clamp(0, 1)
@@ -376,16 +408,21 @@ class DMC(CompressionModel):
         # pic_width and pic_height may be different from x's size. x here is after padding
         # x_hat has the same size with x
         if output_path is not None:
+            # Округление q_scale до 2 знаков (q_index = q_scale * 100) для изображения (y) и motion vector (mv)
             mv_y_q_scale, mv_y_q_index = get_rounded_q(mv_y_q_scale)
             y_q_scale, y_q_index = get_rounded_q(y_q_scale)
             t0 = time.time()
+            # Сжатие исходного изображения в битстрим
             encoded = self.compress(x, dpb,
                                     mv_y_q_scale, y_q_scale)
+            # Запись битстрима в бинарный файл на диске
             encode_p(encoded['bit_stream'], mv_y_q_index, y_q_index, output_path)
             bits = filesize(output_path) * 8
             t1 = time.time()
+            # Чтение битстрима из бинарного файла
             mv_y_q_index, y_q_index, string = decode_p(output_path)
 
+            # Декомпрессия битстрима в выходное изображение и особенности
             decoded = self.decompress(dpb, string,
                                       pic_height, pic_width,
                                       mv_y_q_index / 100, y_q_index / 100)
@@ -413,46 +450,64 @@ class DMC(CompressionModel):
 
     def forward_one_frame(self, x, dpb, mv_y_q_scale=None, y_q_scale=None):
         ref_frame = dpb["ref_frame"]
+        # Генерирует q (quantization) для всех каналов как для изображения (96), так и для motion vector (64)
+        # Это реализация верхней части схемы из рисунка 1 статьи (MV Encoding & Decoding)
         curr_mv_y_q = self.get_curr_mv_y_q(mv_y_q_scale)
         curr_y_q = self.get_curr_y_q(y_q_scale)
 
+        # Получение оптического потока на основе предыдущего кадра (восстановленного) и нынешнего (оригинального)
         est_mv = self.optic_flow(x, ref_frame)
+        # Кодирование оптического потока и его квантизация
         mv_y = self.mv_encoder(est_mv)
         mv_y = mv_y / curr_mv_y_q
+        # Полученный закодированный оптический поток прогоняется через гиперэнкодер, после чего квантизируется, чтобы
+        # получить параметры энтропии для арифметического энкодера и декодера
         mv_z = self.mv_hyper_prior_encoder(mv_y)
         mv_z_hat = self.quant(mv_z)
         mv_params = self.mv_hyper_prior_decoder(mv_z_hat)
         ref_mv_y = dpb["ref_mv_y"]
         if ref_mv_y is None:
             ref_mv_y = torch.zeros_like(mv_y)
+        # Объединение параметров энтропии с оптическим потоком предыдущего кадра
         mv_params = torch.cat((mv_params, ref_mv_y), dim=1)
         mv_q_step, mv_scales, mv_means = self.mv_y_prior_fusion(mv_params).chunk(3, 1)
+        # Кодирование оптического потока арифметическим энкодером
         mv_y_res, mv_y_q, mv_y_hat, mv_scales_hat = self.forward_dual_prior(
             mv_y, mv_means, mv_scales, mv_q_step, self.mv_y_spatial_prior)
         mv_y_hat = mv_y_hat * curr_mv_y_q
 
+        # Декодирование оптического потока
         mv_hat = self.mv_decoder(mv_y_hat)
+        # Получение контекстов для дальнейшего кодирования изображения и его реконструкции
         context1, context2, context3, warp_frame = self.motion_compensation(dpb, mv_hat)
 
+        # Кодирование исходного изображения при помощи контекстов и его квантизация
         y = self.contextual_encoder(x, context1, context2, context3)
         y = y / curr_y_q
+        # Полученное закодированное изображение прогоняется через гиперэнкодер, после чего квантизируется, чтобы
+        # получить параметры энтропии для арифметического энкодера и декодера
         z = self.contextual_hyper_prior_encoder(y)
         z_hat = self.quant(z)
+        # Получение параметров из контекстуального и временного гиперприоров
         hierarchical_params = self.contextual_hyper_prior_decoder(z_hat)
         temporal_params = self.temporal_prior_encoder(context3)
 
         ref_y = dpb["ref_y"]
         if ref_y is None:
             ref_y = torch.zeros_like(y)
+        # Объединение параметров с закодированным предыдущим изображением (в рамках работы с video_net)
         params = torch.cat((temporal_params, hierarchical_params, ref_y), dim=1)
+        # Кодирование изображения арифметическим энкодером
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
         y_res, y_q, y_hat, scales_hat = self.forward_dual_prior(
             y, means, scales, q_step, self.y_spatial_prior)
         y_hat = y_hat * curr_y_q
 
+        # Декодирование особенностей изображения и самого изображения
         recon_image_feature = self.contextual_decoder(y_hat, context2, context3)
         feature, recon_image = self.recon_generation_net(recon_image_feature, context1)
 
+        # Подсчёт метрик
         B, _, H, W = x.size()
         pixel_num = H * W
         mse = self.mse(x, recon_image)
