@@ -265,10 +265,15 @@ class DMC(CompressionModel):
         # x_hat has the same size with x
         # Генерирует q (quantization) для всех каналов как для изображения (96), так и для motion vector (64)
         # Это реализация верхней части схемы из рисунка 1 статьи (MV Encoding & Decoding)
+        #
+        # Вызов данных функций является вторым шагом квантизации из схемы на рисунке 3. Функции умножают заданный
+        # пользователем quantization_step на поканальный quantization_step, который в свою очередь является обучаемым
+        # параметром и при тестировании (обычном прогоне) берёт свои значения из весов
         curr_mv_y_q = self.get_curr_mv_y_q(mv_y_q_scale)
         curr_y_q = self.get_curr_y_q(y_q_scale)
 
         # Получение оптического потока на основе предыдущего кадра (восстановленного) и нынешнего (оригинального)
+        # Для этого используется легковесная реализация SpyNet
         est_mv = self.optic_flow(x, dpb["ref_frame"])
         # Кодирование оптического потока и его квантизация
         mv_y = self.mv_encoder(est_mv)
@@ -283,6 +288,8 @@ class DMC(CompressionModel):
             ref_mv_y = torch.zeros_like(mv_y)
         # Объединение параметров энтропии с оптическим потоком предыдущего кадра???
         mv_params = torch.cat((mv_params, ref_mv_y), dim=1)
+        # mv_q_step - пространственно-временной шаг квантизации оптического потока (обучаемый параметр)
+        # mv_scales, mv_means - параметры энтропии для оптического потока
         mv_q_step, mv_scales, mv_means = self.mv_y_prior_fusion(mv_params).chunk(3, 1)
         # Кодирование оптического потока арифметическим энкодером
         mv_y_q_w_0, mv_y_q_w_1, mv_scales_w_0, mv_scales_w_1, mv_y_hat = self.compress_dual_prior(
@@ -310,8 +317,10 @@ class DMC(CompressionModel):
         # Объединение параметров с закодированным предыдущим изображением (в рамках работы с video_net)
         params = torch.cat((temporal_params, hierarchical_params, ref_y), dim=1)
 
-        # Кодирование изображения арифметическим энкодером
+        # q_step - пространственно-временной шаг квантизации изображения (обучаемый параметр)
+        # scales, means - параметры энтропии для изображения
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
+        # Кодирование изображения арифметическим энкодером
         y_q_w_0, y_q_w_1, scales_w_0, scales_w_1, y_hat = self.compress_dual_prior(
             y, means, scales, q_step, self.y_spatial_prior)
         y_hat = y_hat * curr_y_q
@@ -330,6 +339,7 @@ class DMC(CompressionModel):
         _ = self.gaussian_encoder.encode(y_q_w_1, scales_w_1)
         bit_stream = self.entropy_coder.flush_encoder()
 
+        # dpb - decoded picture buffer
         result = {
             "dbp": {
                 "ref_frame": x_hat,
@@ -344,6 +354,10 @@ class DMC(CompressionModel):
     def decompress(self, dpb, string, height, width,
                    mv_y_q_scale, y_q_scale):
         # Генерирует q (quantization) для всех каналов как для изображения (96), так и для motion vector (64)
+        #
+        # Вызов данных функций является вторым шагом квантизации из схемы на рисунке 3. Функции умножают заданный
+        # пользователем quantization_step на поканальный quantization_step, который в свою очередь является обучаемым
+        # параметром и при тестировании (обычном прогоне) берёт свои значения из весов
         curr_mv_y_q = self.get_curr_mv_y_q(mv_y_q_scale)
         curr_y_q = self.get_curr_y_q(y_q_scale)
 
@@ -359,7 +373,10 @@ class DMC(CompressionModel):
         if ref_mv_y is None:
             _, C, H, W = mv_params.size()
             ref_mv_y = torch.zeros((1, C // 2, H, W), device=mv_params.device)
+        # Объединение параметров энтропии данного шага с декодированным оптическим потоком предыдущего кадра
         mv_params = torch.cat((mv_params, ref_mv_y), dim=1)
+        # mv_q_step - пространственно-временной шаг квантизации оптического потока (обучаемый параметр)
+        # mv_scales, mv_means - параметры энтропии для оптического потока
         mv_q_step, mv_scales, mv_means = self.mv_y_prior_fusion(mv_params).chunk(3, 1)
         # Получение закодированного оптического потока после декодирования арифметическим энкодером
         mv_y_hat = self.decompress_dual_prior(mv_means, mv_scales, mv_q_step,
@@ -383,6 +400,8 @@ class DMC(CompressionModel):
             ref_y = torch.zeros((1, C // 2, H, W), device=temporal_params.device)
         # Получение параметров для энтропии изображения путём объединения из контекстуального и временного гиперприоров
         params = torch.cat((temporal_params, hierarchical_params, ref_y), dim=1)
+        # q_step - пространственно-временной шаг квантизации изображения (обучаемый параметр)
+        # scales, means - параметры энтропии для изображения
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
         # Получение закодированного изображения после декодирования арифметическим энкодером
         y_hat = self.decompress_dual_prior(means, scales, q_step, self.y_spatial_prior)
@@ -452,6 +471,10 @@ class DMC(CompressionModel):
         ref_frame = dpb["ref_frame"]
         # Генерирует q (quantization) для всех каналов как для изображения (96), так и для motion vector (64)
         # Это реализация верхней части схемы из рисунка 1 статьи (MV Encoding & Decoding)
+        #
+        # Вызов данных функций является вторым шагом квантизации из схемы на рисунке 3. Функции умножают заданный
+        # пользователем quantization_step на поканальный quantization_step, который в свою очередь является обучаемым
+        # параметром и при тестировании (обычном прогоне) берёт свои значения из весов
         curr_mv_y_q = self.get_curr_mv_y_q(mv_y_q_scale)
         curr_y_q = self.get_curr_y_q(y_q_scale)
 
@@ -470,6 +493,8 @@ class DMC(CompressionModel):
             ref_mv_y = torch.zeros_like(mv_y)
         # Объединение параметров энтропии с оптическим потоком предыдущего кадра
         mv_params = torch.cat((mv_params, ref_mv_y), dim=1)
+        # mv_q_step - пространственно-временной шаг квантизации оптического потока (обучаемый параметр)
+        # mv_scales, mv_means - параметры энтропии для оптического потока
         mv_q_step, mv_scales, mv_means = self.mv_y_prior_fusion(mv_params).chunk(3, 1)
         # Кодирование оптического потока арифметическим энкодером
         mv_y_res, mv_y_q, mv_y_hat, mv_scales_hat = self.forward_dual_prior(
@@ -497,8 +522,10 @@ class DMC(CompressionModel):
             ref_y = torch.zeros_like(y)
         # Объединение параметров с закодированным предыдущим изображением (в рамках работы с video_net)
         params = torch.cat((temporal_params, hierarchical_params, ref_y), dim=1)
-        # Кодирование изображения арифметическим энкодером
+        # q_step - пространственно-временной шаг квантизации изображения (обучаемый параметр)
+        # scales, means - параметры энтропии для изображения
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
+        # Кодирование изображения арифметическим энкодером
         y_res, y_q, y_hat, scales_hat = self.forward_dual_prior(
             y, means, scales, q_step, self.y_spatial_prior)
         y_hat = y_hat * curr_y_q

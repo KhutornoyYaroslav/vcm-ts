@@ -90,13 +90,16 @@ class CompressionModel(nn.Module):
         return mask_0, mask_1
 
     def process_with_mask(self, y, scales, means, mask):
+        # Наложение маски на параметры энтропии
         scales_hat = scales * mask
         means_hat = means * mask
 
+        # Кодирование данных
         y_res = (y - means_hat) * mask
         y_q = self.quant(y_res)
         y_hat = y_q + means_hat
 
+        # scales в процессе не участвуют, нужны для записи и чтения битстрима в/из файла
         return y_res, y_q, y_hat, scales_hat
 
     def forward_dual_prior(self, y, means, scales, quant_step, y_spatial_prior, write=False):
@@ -108,46 +111,65 @@ class CompressionModel(nn.Module):
         '''
         device = y.device
         _, _, H, W = y.size()
+        # Генерирует маски для кодирования (mask_0 - чётные индексы, mask_1 - нечётные) моделью шахматной доски
         mask_0, mask_1 = self.get_mask(H, W, device)
 
+        # Квантизирует исходные данные и делит их на две части
         quant_step = LowerBound.apply(quant_step, 0.5)
         y = y / quant_step
         y_0, y_1 = y.chunk(2, 1)
 
+        # Деление на две части параметров энтропии
         scales_0, scales_1 = scales.chunk(2, 1)
         means_0, means_1 = means.chunk(2, 1)
 
+        # Первый шаг кодирования моделью шахматной доски
         y_res_0_0, y_q_0_0, y_hat_0_0, scales_hat_0_0 = \
             self.process_with_mask(y_0, scales_0, means_0, mask_0)
         y_res_1_1, y_q_1_1, y_hat_1_1, scales_hat_1_1 = \
             self.process_with_mask(y_1, scales_1, means_1, mask_1)
 
+        # Объединение полученных после первого шага выходных данных (сложение чётных первой половины и нечётных
+        # второй половины)
         params = torch.cat((y_hat_0_0, y_hat_1_1, means, scales, quant_step), dim=1)
+        # Получение новых параметров на основе предыдущего шага
         scales_0, means_0, scales_1, means_1 = y_spatial_prior(params).chunk(4, 1)
 
+        # Второй шаг кодирования моделью шахматной доски
         y_res_0_1, y_q_0_1, y_hat_0_1, scales_hat_0_1 = \
             self.process_with_mask(y_0, scales_0, means_0, mask_1)
         y_res_1_0, y_q_1_0, y_hat_1_0, scales_hat_1_0 = \
             self.process_with_mask(y_1, scales_1, means_1, mask_0)
 
+        # Объединение двух частей результатов в единое целое
+        # Для первой половины
         y_res_0 = y_res_0_0 + y_res_0_1
         y_q_0 = y_q_0_0 + y_q_0_1
         y_hat_0 = y_hat_0_0 + y_hat_0_1
         scales_hat_0 = scales_hat_0_0 + scales_hat_0_1
 
+        # Для второй половины
         y_res_1 = y_res_1_1 + y_res_1_0
         y_q_1 = y_q_1_1 + y_q_1_0
         y_hat_1 = y_hat_1_1 + y_hat_1_0
         scales_hat_1 = scales_hat_1_1 + scales_hat_1_0
 
+        # Объединение двух половин в итоговые тензоры
         y_res = torch.cat((y_res_0, y_res_1), dim=1)
         y_q = torch.cat((y_q_0, y_q_1), dim=1)
         y_hat = torch.cat((y_hat_0, y_hat_1), dim=1)
         scales_hat = torch.cat((scales_hat_0, scales_hat_1), dim=1)
 
+        # Получение выходных данных
         y_hat = y_hat * quant_step
 
         if write:
+            # первый шаг - чётные индексы первой половины + нечётные второй половины
+            # второй шаг - нечётные индексы первой половины + чётные второй половины
+            # y_q_w_0 - квантизированные данные первого шага
+            # y_q_w_1 - квантизированные данные второго шага
+            # scales_w_0 - параметр энтропии первого шага
+            # scales_w_1 - параметр энтропии второго шага
             y_q_w_0 = y_q_0_0 + y_q_1_1
             y_q_w_1 = y_q_0_1 + y_q_1_0
             scales_w_0 = scales_hat_0_0 + scales_hat_1_1
@@ -161,25 +183,33 @@ class CompressionModel(nn.Module):
     def decompress_dual_prior(self, means, scales, quant_step, y_spatial_prior):
         device = means.device
         _, _, H, W = means.size()
+        # Генерирует маски для кодирования (mask_0 - чётные индексы, mask_1 - нечётные) моделью шахматной доски
         mask_0, mask_1 = self.get_mask(H, W, device)
         quant_step = torch.clamp_min(quant_step, 0.5)
 
+        # Деление на две части параметров энтропии
         scales_0, scales_1 = scales.chunk(2, 1)
         means_0, means_1 = means.chunk(2, 1)
 
+        # Первый шаг декодирования квантизированного тензора
         scales_r_0 = scales_0 * mask_0 + scales_1 * mask_1
         y_q_r_0 = self.gaussian_encoder.decode_stream(scales_r_0).to(device)
         y_hat_0_0 = (y_q_r_0 + means_0) * mask_0
         y_hat_1_1 = (y_q_r_0 + means_1) * mask_1
 
+        # Объединение полученных после первого шага выходных данных (сложение чётных первой половины и нечётных
+        # второй половины)
         params = torch.cat((y_hat_0_0, y_hat_1_1, means, scales, quant_step), dim=1)
+        # Получение новых параметров на основе предыдущего шага
         scales_0, means_0, scales_1, means_1 = y_spatial_prior(params).chunk(4, 1)
 
+        # Второй шаг декодирования квантизированного тензора
         scales_r_1 = scales_0 * mask_1 + scales_1 * mask_0
         y_q_r_1 = self.gaussian_encoder.decode_stream(scales_r_1).to(device)
         y_hat_0_1 = (y_q_r_1 + means_0) * mask_1
         y_hat_1_0 = (y_q_r_1 + means_1) * mask_0
 
+        # Объединение двух половин в итоговый тензор
         y_hat_0 = y_hat_0_0 + y_hat_0_1
         y_hat_1 = y_hat_1_1 + y_hat_1_0
         y_hat = torch.cat((y_hat_0, y_hat_1), dim=1)
