@@ -1,0 +1,110 @@
+import os
+import torch
+import logging
+import argparse
+from core.utils import dist_util
+from core.config import cfg as cfg
+from core.engine.train import do_train
+from core.data import make_data_loader
+from core.utils.logger import setup_logger
+from core.modelling.model import build_model
+from core.utils.checkpoint import CheckPointer
+from core.data.datasets import build_dataset
+from core.solver import make_optimizers, make_lr_scheduler
+
+
+def train_model(cfg, args):
+    logger = logging.getLogger('CORE')
+    device = torch.device(cfg.MODEL.DEVICE)
+
+    # Create model
+    model = build_model(cfg)
+    model.to(device)
+
+    # Create data loader
+    data_loader = make_data_loader(cfg, is_train=True)
+
+    # # Check dataset (uncomment)
+    # datasets = build_dataset(cfg.DATASET.TYPE, cfg.DATASET.TRAIN_ROOT_DIRS[0], cfg, is_train=True)
+    # datasets.visualize(50)
+    # return -1
+
+    # Create optimizer
+    optimizers = make_optimizers(cfg, model, args.num_gpus)
+    scheduler = make_lr_scheduler(cfg, optimizers['net'])
+
+    # Init SPyNET by default weights
+    if model.generator.spynet is not None:
+        spynet_checkpointer = CheckPointer(model.generator.spynet, logger=logger)
+        spynet_checkpointer.load('https://download.openmmlab.com/mmediting/restorers/basicvsr/spynet_20210409-c6c1bd09.pth')
+
+    # # Init FTVSR by default weights
+    # if cfg.MODEL.ARCHITECTURE in ['FTVSR']:
+    #     ftvsr_checkpointer = CheckPointer(model, logger=logger)
+    #     ftvsr_checkpointer.load('pretrained/FTVSR_REDS.pth')
+
+    # Create checkpointer
+    arguments = {"epoch": 0}
+    save_to_disk = dist_util.is_main_process()
+    checkpointer = CheckPointer(model, optimizers['net'], optimizers['aux'], scheduler, cfg.OUTPUT_DIR, save_to_disk, logger)
+    extra_checkpoint_data = checkpointer.load()
+    arguments.update(extra_checkpoint_data)
+
+    # Train model
+    model = do_train(cfg, model, data_loader, optimizers, scheduler, checkpointer, device, arguments, args)
+
+    return model
+
+
+def str2bool(s):
+    return s.lower() in ('true', '1')
+
+
+def main():
+    # Create argument parser
+    parser = argparse.ArgumentParser(description='Image/Video Codec Model Training With PyTorch')
+    parser.add_argument("--config-file", dest="config_file", required=False, type=str, default="configs/cfg.yaml",
+                        help="Path to config file")
+    parser.add_argument('--save-step', dest="save_step", required=False, type=int, default=1,
+                        help='Save checkpoint every save_step')
+    parser.add_argument('--eval-step', dest="eval_step", required=False, type=int, default=1,
+                        help='Evaluate datasets every eval_step, disabled when eval_step < 0')
+    parser.add_argument('--use-tensorboard', dest="use_tensorboard", required=False, default=True, type=str2bool,
+                        help='Use tensorboard summary writer')
+    parser.add_argument('opts', default=None, nargs=argparse.REMAINDER,
+                        help="Modify config options using the command-line")
+
+    args = parser.parse_args()
+    NUM_GPUS = 1
+    args.distributed = False
+    args.num_gpus = NUM_GPUS
+
+    # Enable cudnn auto-tuner to find the best algorithm to use for your hardware.
+    torch.manual_seed(1)
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
+
+    # Create config
+    cfg.merge_from_file(args.config_file)
+    cfg.merge_from_list(args.opts)
+    cfg.freeze()
+
+    # Create output directory
+    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+
+    # Create logger
+    logger = setup_logger("CORE", dist_util.get_rank(), cfg.OUTPUT_DIR)
+    logger.info("Using {} GPUs".format(NUM_GPUS))
+    logger.info(args)
+    logger.info("Loaded configuration file {}".format(args.config_file))
+
+    # Create config backup
+    with open(os.path.join(cfg.OUTPUT_DIR, 'cfg.yaml'), "w") as cfg_dump:
+        cfg_dump.write(str(cfg))
+
+    # Train model
+    model = train_model(cfg, args)
+
+
+if __name__ == '__main__':
+    main()

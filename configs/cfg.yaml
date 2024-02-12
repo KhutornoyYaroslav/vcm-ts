@@ -1,0 +1,31 @@
+DATASET:
+  READ_MASKS: False
+  READ_RESIDS: False
+  SEQUENCE_LENGTH: 10
+  SEQUENCE_STRIDE: 1
+  SUBDIR_INPUTS: 'lr_h265'
+  SUBDIR_RESIDS: 'resids_h265'
+  SUBDIR_TARGETS: 'hr'
+  TEST_ROOT_DIRS: ['/media/yaroslav/SSD/khutornoy/data/huawei/outputs/train/test_21_0']
+  TRAIN_ROOT_DIRS: ['/media/yaroslav/SSD/khutornoy/data/REDS/train_sharp_160']
+  TYPE: SequenceDataset
+DATA_LOADER:
+  NUM_WORKERS: 8
+  PIN_MEMORY: True
+INPUT:
+  MAKE_DIVISIBLE_BY: 8
+MODEL:
+  ARCHITECTURE: FTVSR
+  DEVICE: cuda
+  MID_CHANNELS: 64
+  NUM_BLOCKS: 30
+  SPYNET_FREEZE_FOR_EPOCHS: 1
+OUTPUT_DIR: outputs/ftvsr_zero_training_small
+SOLVER:
+  LR: 1e-4
+  LR_SPYNET: 1e-5
+  MAX_EPOCH: 64
+  PERCEPTION_LOSS_WEIGHT: 1e-3
+TENSORBOARD:
+  BEST_SAMPLES_NUM: 16
+  WORST_SAMPLES_NUM: 16

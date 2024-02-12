@@ -1,0 +1,30 @@
+CUTOUT_LAYER:
+  DETECTORS:
+    FACES:
+      DEVICE: 'cuda'
+      ENABLE: True
+      PADDING: 10
+      PROB: 0.9
+    LIPLATES:
+      DEVICE: 'cuda'
+      ENABLE: True
+      PADDING: 10
+      PROB: 0.7
+  H265:
+    CRF: 21
+    PIX_FMT: 'gbrp'
+    PRESET: 'veryfast'
+VIDEO_LAYER:
+  H265:
+    CRF: 23
+    PIX_FMT: 'gbrp'
+    PRESET: 'veryfast'
+  VSR_MODEL:
+    ARCHITECTURE: 'FTVSR'
+    DEVICE: 'cuda'
+    CHUNK_SIZE: 10
+    MID_CHANNELS: 64
+    NUM_BLOCKS: 60
+    TILE_PADDING: 16
+    TILE_SIZE: 160
+    WEIGHTS_PATH: 'outputs/rftvsr_3/model_009591.pth'
