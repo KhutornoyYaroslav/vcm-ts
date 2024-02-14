@@ -39,6 +39,8 @@ class DCVCSequenceDataset(Dataset):
 
             if inputs_len >= min_length:
                 seqs_filtered.append(s)
+            else:
+                print(f"Skip sequence due to length: '{s}'")
 
         return seqs_filtered
 
@@ -46,16 +48,15 @@ class DCVCSequenceDataset(Dataset):
         if is_train:
             transform = [
                 MakeDivisibleBy(div_by),
-                # ConvertColor('BGR', 'RGB'),
-                # RandomResidualsCutPatch(0.25, 0.5, 0.1),
-                # RandomResidualsCutPatch(1.0, 1.0, 0.33),
+                # TODO: add RandomCrop transform with input size (256x256)
+                ConvertColor('BGR', 'RGB'),
                 ConvertFromInts(),
                 Clip()
             ]
         else:
             transform = [
                 MakeDivisibleBy(div_by),
-                # ConvertColor('BGR', 'RGB'),
+                ConvertColor('BGR', 'RGB'),
                 ConvertFromInts(),
                 Clip()
             ]
@@ -78,12 +79,9 @@ class DCVCSequenceDataset(Dataset):
         inputs = []
         for i in range(len(input_paths)):
             input = cv.imread(input_paths[i])
+            inputs.append(input)
 
-            # (1, H, W, C)
-            inputs.append(np.expand_dims(input, axis=0))
-
-        # (T, H, W, C)
-        input_seq = np.concatenate(inputs, axis=0)
+        input_seq = np.stack(inputs, axis=0) # (T, H, W, C)
         target_seq = input_seq.copy()
 
         # Apply transforms
@@ -99,6 +97,9 @@ class DCVCSequenceDataset(Dataset):
             for input, target in zip(input_seq, target_seq):
                 input = (input.cpu().numpy() * 255).astype(np.uint8).transpose(1, 2, 0)
                 target = (target.cpu().numpy() * 255).astype(np.uint8).transpose(1, 2, 0)
+
+                input = cv.cvtColor(input, cv.COLOR_RGB2BGR)
+                target = cv.cvtColor(target, cv.COLOR_RGB2BGR)
 
                 cv.imshow('Input', input)
                 cv.imshow('Target', target)

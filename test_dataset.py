@@ -22,7 +22,7 @@ def main():
 
     # Check dataset
     datasets = build_dataset(cfg.DATASET.TYPE, cfg.DATASET.TRAIN_ROOT_DIRS[0], cfg, is_train=True)
-    datasets.visualize(1)
+    datasets.visualize(25)
 
 
 if __name__ == '__main__':
