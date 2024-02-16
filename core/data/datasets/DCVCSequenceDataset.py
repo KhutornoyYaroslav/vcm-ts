@@ -12,7 +12,8 @@ from ..transforms.transforms import (
     ToTensor,
     TransformCompose,
     ConvertColor,
-    MakeDivisibleBy
+    MakeDivisibleBy,
+    RandomCrop
 )
 
 
@@ -47,6 +48,7 @@ class DCVCSequenceDataset(Dataset):
     def build_transforms(self, div_by: int = 1, is_train: bool = True, to_tensor: bool = True):
         if is_train:
             transform = [
+                RandomCrop(256, 256, 1.0),
                 MakeDivisibleBy(div_by),
                 # TODO: add RandomCrop transform with input size (256x256)
                 ConvertColor('BGR', 'RGB'),
@@ -55,6 +57,7 @@ class DCVCSequenceDataset(Dataset):
             ]
         else:
             transform = [
+                RandomCrop(256, 256, 1.0),
                 MakeDivisibleBy(div_by),
                 ConvertColor('BGR', 'RGB'),
                 ConvertFromInts(),
