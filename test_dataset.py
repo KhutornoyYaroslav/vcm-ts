@@ -1,14 +1,13 @@
-import argparse
 import os
-
-from core.config import dcvc_cfg as cfg
+import argparse
+from core.config import cfg as cfg
 from core.data.datasets import build_dataset
 
 
 def main():
     # Create argument parser
     parser = argparse.ArgumentParser(description='Testing dataset')
-    parser.add_argument("--config-file", dest="config_file", required=False, type=str, default="configs/dcvc_cfg.yaml",
+    parser.add_argument("--config-file", dest="config_file", required=False, type=str, default="configs/cfg.yaml",
                         help="Path to config file")
     parser.add_argument('opts', default=None, nargs=argparse.REMAINDER,
                         help="Modify config options using the command-line")

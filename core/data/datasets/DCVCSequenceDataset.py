@@ -1,10 +1,9 @@
 import os
-from glob import glob
-
 import cv2 as cv
 import numpy as np
+from glob import glob
+from typing import Tuple
 from torch.utils.data import Dataset
-
 from ..transforms.transforms import (
     ConvertFromInts,
     Clip,
@@ -26,7 +25,7 @@ class DCVCSequenceDataset(Dataset):
         self.seq_length = cfg.DATASET.SEQUENCE_LENGTH
         self.seq_stride = cfg.DATASET.SEQUENCE_STRIDE
         self.sequences = self.read_sequences(self.root_dir, self.seq_length * self.seq_stride)
-        self.transforms = self.build_transforms(self.divisible_by, is_train, to_tensor)
+        self.transforms = self.build_transforms(cfg.INPUT.IMAGE_SIZE, self.divisible_by, is_train, to_tensor)
 
     def __len__(self):
         return len(self.sequences)
@@ -45,19 +44,18 @@ class DCVCSequenceDataset(Dataset):
 
         return seqs_filtered
 
-    def build_transforms(self, div_by: int = 1, is_train: bool = True, to_tensor: bool = True):
+    def build_transforms(self, img_size: Tuple[int, int], div_by: int = 1, is_train: bool = True, to_tensor: bool = True):
         if is_train:
             transform = [
-                RandomCrop(256, 256, 1.0),
+                RandomCrop(img_size[0], img_size[1], 1.0),
                 MakeDivisibleBy(div_by),
-                # TODO: add RandomCrop transform with input size (256x256)
                 ConvertColor('BGR', 'RGB'),
                 ConvertFromInts(),
                 Clip()
             ]
         else:
             transform = [
-                RandomCrop(256, 256, 1.0),
+                RandomCrop(img_size[0], img_size[1], 1.0),
                 MakeDivisibleBy(div_by),
                 ConvertColor('BGR', 'RGB'),
                 ConvertFromInts(),
