@@ -1,9 +1,0 @@
-DATASET:
-  SEQUENCE_LENGTH: 16
-  SEQUENCE_STRIDE: 1
-  SUBDIR_INPUTS: 'raw'
-  TEST_ROOT_DIRS: ['data/huawei/outputs/train/test_0']
-  TRAIN_ROOT_DIRS: ['data/huawei/outputs/train/test_0']
-  TYPE: DCVCSequenceDataset
-INPUT:
-  MAKE_DIVISIBLE_BY: 16
