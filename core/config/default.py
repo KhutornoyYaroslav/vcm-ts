@@ -6,17 +6,18 @@ _CFG = CN()
 # Model
 # ---------------------------------------------------------------------------- #
 _CFG.MODEL = CN()
-_CFG.MODEL.ARCHITECTURE = 'FTVSR'
-_CFG.MODEL.DEVICE = "cuda"
-_CFG.MODEL.MID_CHANNELS = 64
-_CFG.MODEL.NUM_BLOCKS = 60
-_CFG.MODEL.SPYNET_FREEZE_FOR_EPOCHS = 1
+_CFG.MODEL.ARCHITECTURE = 'DCVC_HEM'
+_CFG.MODEL.DEVICE = "cpu"
+# _CFG.MODEL.MID_CHANNELS = 64
+# _CFG.MODEL.NUM_BLOCKS = 60
+# _CFG.MODEL.SPYNET_FREEZE_FOR_EPOCHS = 1
 
 # -----------------------------------------------------------------------------
 # INPUT
 # -----------------------------------------------------------------------------
 _CFG.INPUT = CN()
 _CFG.INPUT.MAKE_DIVISIBLE_BY = 8
+_CFG.INPUT.IMAGE_SIZE = (256, 256)
 
 # -----------------------------------------------------------------------------
 # Dataset
@@ -27,11 +28,7 @@ _CFG.DATASET.TRAIN_ROOT_DIRS = []
 _CFG.DATASET.TEST_ROOT_DIRS = []
 _CFG.DATASET.SEQUENCE_LENGTH = 16
 _CFG.DATASET.SEQUENCE_STRIDE = 1
-_CFG.DATASET.SUBDIR_INPUTS = 'lr'
-_CFG.DATASET.SUBDIR_TARGETS = 'hr'
-_CFG.DATASET.SUBDIR_RESIDS = 'resids'
-_CFG.DATASET.READ_MASKS = False
-_CFG.DATASET.READ_RESIDS = False
+_CFG.DATASET.SUBDIR_INPUTS = 'raw'
 
 # -----------------------------------------------------------------------------
 # DataLoader
@@ -46,8 +43,9 @@ _CFG.DATA_LOADER.PIN_MEMORY = True
 _CFG.SOLVER = CN()
 _CFG.SOLVER.MAX_EPOCH = 128
 _CFG.SOLVER.LR = 2e-4
-_CFG.SOLVER.LR_SPYNET = 1e-5
-_CFG.SOLVER.PERCEPTION_LOSS_WEIGHT = 0.01
+_CFG.SOLVER.BATCH_SIZE = 4
+# _CFG.SOLVER.LR_SPYNET = 1e-5
+# _CFG.SOLVER.PERCEPTION_LOSS_WEIGHT = 0.01
 
 # ---------------------------------------------------------------------------- #
 # Output options
