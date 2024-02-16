@@ -23,6 +23,7 @@ def create_loader(dataset: Dataset,
 
     batch_sampler = BatchSampler(sampler=sampler, batch_size=batch_size, drop_last=True)
     data_loader = DataLoader(dataset, num_workers=num_workers, batch_sampler=batch_sampler, pin_memory=pin_memory)
+
     return data_loader
 
 
@@ -43,8 +44,7 @@ def make_data_loader(cfg, is_train: bool = True) -> DataLoader:
     dataset = ConcatDataset(datasets)
 
     # Create data loader
-    # batch_size = cfg.SOLVER.BATCH_SIZE if is_train else cfg.TEST.BATCH_SIZE
-    batch_size = 1 # NOTE: batch_size for used VSR models always equals 1
+    batch_size = cfg.SOLVER.BATCH_SIZE if is_train else cfg.TEST.BATCH_SIZE
     shuffle = is_train
     data_loader = create_loader(dataset, shuffle, batch_size, cfg.DATA_LOADER.NUM_WORKERS, cfg.DATA_LOADER.PIN_MEMORY)
 
