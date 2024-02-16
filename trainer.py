@@ -10,7 +10,7 @@ from core.utils.logger import setup_logger
 from core.modelling.model import build_model
 from core.utils.checkpoint import CheckPointer
 from core.data.datasets import build_dataset
-from core.solver import make_optimizers, make_lr_scheduler
+from core.solver import make_optimizer, make_lr_scheduler
 
 
 def train_model(cfg, args):
@@ -30,13 +30,13 @@ def train_model(cfg, args):
     # return -1
 
     # Create optimizer
-    optimizers = make_optimizers(cfg, model, args.num_gpus)
-    scheduler = make_lr_scheduler(cfg, optimizers['net'])
+    optimizer = make_optimizer(cfg, model, args.num_gpus)
+    scheduler = None # make_lr_scheduler(cfg, optimizers['net'])
 
-    # Init SPyNET by default weights
-    if model.generator.spynet is not None:
-        spynet_checkpointer = CheckPointer(model.generator.spynet, logger=logger)
-        spynet_checkpointer.load('https://download.openmmlab.com/mmediting/restorers/basicvsr/spynet_20210409-c6c1bd09.pth')
+    # # Init SPyNET by default weights
+    # if model.generator.spynet is not None:
+    #     spynet_checkpointer = CheckPointer(model.generator.spynet, logger=logger)
+    #     spynet_checkpointer.load('https://download.openmmlab.com/mmediting/restorers/basicvsr/spynet_20210409-c6c1bd09.pth')
 
     # # Init FTVSR by default weights
     # if cfg.MODEL.ARCHITECTURE in ['FTVSR']:
@@ -45,13 +45,14 @@ def train_model(cfg, args):
 
     # Create checkpointer
     arguments = {"epoch": 0}
-    save_to_disk = dist_util.is_main_process()
-    checkpointer = CheckPointer(model, optimizers['net'], optimizers['aux'], scheduler, cfg.OUTPUT_DIR, save_to_disk, logger)
-    extra_checkpoint_data = checkpointer.load()
-    arguments.update(extra_checkpoint_data)
+    # save_to_disk = dist_util.is_main_process()
+    # checkpointer = CheckPointer(model, optimizers['net'], optimizers['aux'], scheduler, cfg.OUTPUT_DIR, save_to_disk, logger)
+    # extra_checkpoint_data = checkpointer.load()
+    # arguments.update(extra_checkpoint_data)
+    checkpointer = None # TODO:
 
     # Train model
-    model = do_train(cfg, model, data_loader, optimizers, scheduler, checkpointer, device, arguments, args)
+    model = do_train(cfg, model, data_loader, optimizer, scheduler, checkpointer, device, arguments, args)
 
     return model
 
