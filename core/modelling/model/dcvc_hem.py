@@ -7,7 +7,7 @@ class DCVC_HEM(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.dmc = DMC(anchor_num=cfg.SOLVER.BATCH_SIZE)
+        self.dmc = DMC(anchor_num=len(cfg.SOLVER.LAMBDAS))
 
     def forward(self, input: torch.Tensor):
         """

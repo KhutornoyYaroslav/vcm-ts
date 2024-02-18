@@ -44,7 +44,7 @@ def make_data_loader(cfg, is_train: bool = True) -> DataLoader:
     dataset = ConcatDataset(datasets)
 
     # Create data loader
-    batch_size = cfg.SOLVER.BATCH_SIZE if is_train else cfg.TEST.BATCH_SIZE
+    batch_size = len(cfg.SOLVER.LAMBDAS) if is_train else cfg.TEST.BATCH_SIZE
     shuffle = is_train
     data_loader = create_loader(dataset, shuffle, batch_size, cfg.DATA_LOADER.NUM_WORKERS, cfg.DATA_LOADER.PIN_MEMORY)
 

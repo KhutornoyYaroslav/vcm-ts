@@ -78,6 +78,8 @@ def do_train(cfg,
     start_epoch = arguments["epoch"]
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
+    lambdas = torch.IntTensor(cfg.SOLVER.LAMBDAS)
+    lambdas = lambdas.to(device)
 
     # Epoch loop
     for epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCH):
@@ -135,7 +137,7 @@ def do_train(cfg,
             bpp_mean = torch.mean(outputs['bpp'], dim=1) # (N, T) -> (N)
             mse_mean = torch.mean(outputs['mse'], dim=1) # (N, T) -> (N)
 
-            loss_mean = bpp_mean + mse_mean # TODO: lambdas
+            loss_mean = bpp_mean + mse_mean * lambdas # TODO: lambdas
             # loss_mean = bpp_mean
             loss = torch.mean(loss_mean)
 

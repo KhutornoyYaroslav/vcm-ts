@@ -3,7 +3,7 @@ DATASET:
   SEQUENCE_STRIDE: 1
   SUBDIR_INPUTS: ''
   TEST_ROOT_DIRS: []
-  TRAIN_ROOT_DIRS: ['/media/yaroslav/SSD970PRO/Huawei/datasets/vimeo_septuplet/test']
+  TRAIN_ROOT_DIRS: ['data/huawei/outputs/train/test_0/test_0_data']
   TYPE: DCVCSequenceDataset
 DATA_LOADER:
   NUM_WORKERS: 8
@@ -16,7 +16,7 @@ MODEL:
   DEVICE: cuda
 OUTPUT_DIR: outputs/test
 SOLVER:
-  BATCH_SIZE: 1
+  LAMBDAS: [85, 170, 380, 840]
   LR: 0.0002
   MAX_EPOCH: 128
 TENSORBOARD:
