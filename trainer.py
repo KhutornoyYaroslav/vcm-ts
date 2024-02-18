@@ -45,11 +45,12 @@ def train_model(cfg, args):
 
     # Create checkpointer
     arguments = {"epoch": 0}
-    # save_to_disk = dist_util.is_main_process()
-    # checkpointer = CheckPointer(model, optimizers['net'], optimizers['aux'], scheduler, cfg.OUTPUT_DIR, save_to_disk, logger)
-    # extra_checkpoint_data = checkpointer.load()
-    # arguments.update(extra_checkpoint_data)
-    checkpointer = None # TODO:
+    save_to_disk = dist_util.is_main_process()
+    checkpointer = CheckPointer(model, optimizer, scheduler, cfg.OUTPUT_DIR, save_to_disk, logger)
+    # Init DMC by default weights
+    checkpointer.load('DCVC_HEM/checkpoints/acmmm2022_video_psnr.pth.tar')
+    extra_checkpoint_data = checkpointer.load()
+    arguments.update(extra_checkpoint_data)
 
     # Train model
     model = do_train(cfg, model, data_loader, optimizer, scheduler, checkpointer, device, arguments, args)

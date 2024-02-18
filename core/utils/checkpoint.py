@@ -11,22 +11,20 @@ class CheckPointer:
     def __init__(self,
                  model,
                  optimizer=None,
-                 aux_optimizer=None,
                  scheduler=None,
                  save_dir="",
                  save_to_disk=None,
                  logger=None,
-                 chckpt_path=None):
+                 ckpt_path=None):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.aux_optimizer = aux_optimizer
         self.save_dir = save_dir
         self.save_to_disk = save_to_disk
         if logger is None:
             logger = logging.getLogger(__name__)
         self.logger = logger
-        self.chckpt_path = chckpt_path
+        self.ckpt_path = ckpt_path
 
     def save(self, name, **kwargs):
         if not self.save_dir:
@@ -45,9 +43,6 @@ class CheckPointer:
         if self.optimizer is not None:
             self.logger.info("Saving optimizer state dict")
             data["optimizer"] = self.optimizer.state_dict()
-        if self.aux_optimizer is not None:
-            self.logger.info("Saving aux optimizer state dict")
-            data["aux_optimizer"] = self.aux_optimizer.state_dict()
         if self.scheduler is not None:
             self.logger.info("Saving scheduler state dict")
             data["scheduler"] = self.scheduler.state_dict()
@@ -85,10 +80,10 @@ class CheckPointer:
             try:
                 model.load_state_dict(checkpoint.pop("state_dict"), strict=False)
             except ValueError:
-                self.logger.info("Model state dict load failed")        
+                self.logger.info("Model state dict load failed")
         else:
             try:
-                model.load_state_dict(checkpoint, strict=False)
+                model.dmc.load_state_dict(checkpoint, strict=False)
             except ValueError:
                 self.logger.info("Model state dict load failed")
 
@@ -98,13 +93,6 @@ class CheckPointer:
                 self.optimizer.load_state_dict(checkpoint.pop("optimizer"))
             except ValueError:
                 self.logger.info("Optimizer state dict load failed")
-
-        if "aux_optimizer" in checkpoint and self.aux_optimizer:
-            self.logger.info("Loading aux optimizer state dict from {}".format(f))
-            try:
-                self.aux_optimizer.load_state_dict(checkpoint.pop("aux_optimizer"))
-            except ValueError:
-                self.logger.info("Aux optimizer state dict load failed")
 
         if "scheduler" in checkpoint and self.scheduler:
             self.logger.info("Loading scheduler state dict from {}".format(f))
@@ -116,7 +104,7 @@ class CheckPointer:
         return checkpoint
 
     def get_checkpoint_file(self):
-        if self.chckpt_path == None:
+        if self.ckpt_path is None:
             save_file = os.path.join(self.save_dir, self._last_checkpoint_name)
             try:
                 with open(save_file, "r") as f:
@@ -127,7 +115,7 @@ class CheckPointer:
                 # deleted by a separate process
                 last_saved = ""
         else:
-            last_saved = self.chckpt_path
+            last_saved = self.ckpt_path
         return last_saved
 
     def has_checkpoint(self):

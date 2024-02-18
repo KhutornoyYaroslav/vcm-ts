@@ -99,7 +99,7 @@ def make_optimizer(cfg, model: torch.nn.Module, num_gpus: int = 1) -> torch.opti
         if p.requires_grad:
             params.append(p)
 
-    optimizer = torch.optim.AdamW(params=params, betas=(0.9, 0.99))
+    optimizer = torch.optim.AdamW(params=params, lr=lr, betas=(0.9, 0.99))
 
     return optimizer
 
