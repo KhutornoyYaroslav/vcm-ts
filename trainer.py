@@ -9,7 +9,6 @@ from core.data import make_data_loader
 from core.utils.logger import setup_logger
 from core.modelling.model import build_model
 from core.utils.checkpoint import CheckPointer
-from core.data.datasets import build_dataset
 from core.solver import make_optimizer, make_lr_scheduler
 
 
@@ -24,31 +23,17 @@ def train_model(cfg, args):
     # Create data loader
     data_loader = make_data_loader(cfg, is_train=True)
 
-    # # Check dataset (uncomment)
-    # datasets = build_dataset(cfg.DATASET.TYPE, cfg.DATASET.TRAIN_ROOT_DIRS[0], cfg, is_train=True)
-    # datasets.visualize(50)
-    # return -1
-
     # Create optimizer
     optimizer = make_optimizer(cfg, model, args.num_gpus)
     scheduler = None # make_lr_scheduler(cfg, optimizers['net'])
-
-    # # Init SPyNET by default weights
-    # if model.generator.spynet is not None:
-    #     spynet_checkpointer = CheckPointer(model.generator.spynet, logger=logger)
-    #     spynet_checkpointer.load('https://download.openmmlab.com/mmediting/restorers/basicvsr/spynet_20210409-c6c1bd09.pth')
-
-    # # Init FTVSR by default weights
-    # if cfg.MODEL.ARCHITECTURE in ['FTVSR']:
-    #     ftvsr_checkpointer = CheckPointer(model, logger=logger)
-    #     ftvsr_checkpointer.load('pretrained/FTVSR_REDS.pth')
 
     # Create checkpointer
     arguments = {"epoch": 0}
     save_to_disk = dist_util.is_main_process()
     checkpointer = CheckPointer(model, optimizer, scheduler, cfg.OUTPUT_DIR, save_to_disk, logger)
+
     # Init DMC by default weights
-    checkpointer.load('DCVC_HEM/checkpoints/acmmm2022_video_psnr.pth.tar')
+    extra_checkpoint_data = checkpointer.load('pretrained/acmmm2022_video_psnr.pth')
     extra_checkpoint_data = checkpointer.load()
     arguments.update(extra_checkpoint_data)
 
