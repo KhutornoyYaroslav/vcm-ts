@@ -4,7 +4,7 @@ import torchvision
 import numpy as np
 from torch import nn
 from core.utils.ssim import MS_SSIM
-from core.modelling.model.yolov6 import YOLOv6Detector
+# from core.modelling.model.yolov6 import YOLOv6Detector
 from scipy.optimize import linear_sum_assignment
 from torchvision.models.feature_extraction import create_feature_extractor
 
@@ -149,73 +149,73 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
         return torch.FloatTensor([loss])
 
 
-class DetectionLoss(nn.Module):
-    def __init__(self):
-        super(DetectionLoss, self).__init__()
-        self.roi_model = YOLOv6Detector("yolov6l.pt")
+# class DetectionLoss(nn.Module):
+#     def __init__(self):
+#         super(DetectionLoss, self).__init__()
+#         self.roi_model = YOLOv6Detector("yolov6l.pt")
 
-    def forward(self, inputs, targets, targets_are_images=True):
-        if targets_are_images:
-            bboxes = self.roi_model.detect(targets)
+#     def forward(self, inputs, targets, targets_are_images=True):
+#         if targets_are_images:
+#             bboxes = self.roi_model.detect(targets)
 
-        new_bboxes = self.roi_model.detect(inputs)
+#         new_bboxes = self.roi_model.detect(inputs)
 
-        loss = 0
-        for bbx1, bbx2 in zip(bboxes, new_bboxes):  # batches
-            loss += self._arbitrary_size_iou_loss(bbx1, bbx2)
-        loss /= len(bboxes)
+#         loss = 0
+#         for bbx1, bbx2 in zip(bboxes, new_bboxes):  # batches
+#             loss += self._arbitrary_size_iou_loss(bbx1, bbx2)
+#         loss /= len(bboxes)
 
-        return loss
+#         return loss
 
-    @staticmethod
-    def _iou(box1, box2):
-        if int(box1[5]) != int(box2[5]):  # different classes
-            return 0
+#     @staticmethod
+#     def _iou(box1, box2):
+#         if int(box1[5]) != int(box2[5]):  # different classes
+#             return 0
 
-        x_min = max(box1[0], box2[0])
-        y_min = max(box1[1], box2[1])
-        x_max = min(box1[2], box2[2])
-        y_max = min(box1[3], box2[3])
+#         x_min = max(box1[0], box2[0])
+#         y_min = max(box1[1], box2[1])
+#         x_max = min(box1[2], box2[2])
+#         y_max = min(box1[3], box2[3])
 
-        intersection = max(0, x_max - x_min) * max(0, y_max - y_min)
+#         intersection = max(0, x_max - x_min) * max(0, y_max - y_min)
 
-        box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
-        box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
-        union = box1_area + box2_area - intersection
+#         box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+#         box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
+#         union = box1_area + box2_area - intersection
 
-        return intersection / union
+#         return intersection / union
 
-    def _arbitrary_size_iou_loss(self, bboxes1, bboxes2):
-        # TODO: include scores
-        # cp_bboxes1 = bboxes1.detach().clone()
-        bboxes1 = bboxes1[bboxes1[:, 4] > 0.001]
-        bboxes1 = bboxes1[np.isin(bboxes1[:, 5].int(), self.roi_model.allowed_class_idxs)]
-        bboxes2 = bboxes2[bboxes2[:, 4] > 0.001]
-        bboxes2 = bboxes2[np.isin(bboxes2[:, 5].int(), self.roi_model.allowed_class_idxs)]
-        num_boxes_a = len(bboxes1)
-        num_boxes_b = len(bboxes2)
-        if num_boxes_a == 0 and num_boxes_b == 0:  # both empty, good
-            return np.float64(0)
-        if (num_boxes_a == 0) != (num_boxes_b == 0):  # only one empty (xor), bad
-            return np.float64(1)
+#     def _arbitrary_size_iou_loss(self, bboxes1, bboxes2):
+#         # TODO: include scores
+#         # cp_bboxes1 = bboxes1.detach().clone()
+#         bboxes1 = bboxes1[bboxes1[:, 4] > 0.001]
+#         bboxes1 = bboxes1[np.isin(bboxes1[:, 5].int(), self.roi_model.allowed_class_idxs)]
+#         bboxes2 = bboxes2[bboxes2[:, 4] > 0.001]
+#         bboxes2 = bboxes2[np.isin(bboxes2[:, 5].int(), self.roi_model.allowed_class_idxs)]
+#         num_boxes_a = len(bboxes1)
+#         num_boxes_b = len(bboxes2)
+#         if num_boxes_a == 0 and num_boxes_b == 0:  # both empty, good
+#             return np.float64(0)
+#         if (num_boxes_a == 0) != (num_boxes_b == 0):  # only one empty (xor), bad
+#             return np.float64(1)
 
-        # Calculate the IoU matrix
-        iou_matrix = np.zeros((num_boxes_a, num_boxes_b))
-        for i in range(num_boxes_a):
-            for j in range(num_boxes_b):
-                iou_matrix[i, j] = self._iou(bboxes1[i], bboxes2[j])
+#         # Calculate the IoU matrix
+#         iou_matrix = np.zeros((num_boxes_a, num_boxes_b))
+#         for i in range(num_boxes_a):
+#             for j in range(num_boxes_b):
+#                 iou_matrix[i, j] = self._iou(bboxes1[i], bboxes2[j])
 
-        # Use the Hungarian algorithm to find the optimal matching of boxes
-        row_ind, col_ind = linear_sum_assignment(-1 * iou_matrix)
+#         # Use the Hungarian algorithm to find the optimal matching of boxes
+#         row_ind, col_ind = linear_sum_assignment(-1 * iou_matrix)
 
-        # Calculate the overall IoU
-        ious = 0
-        for i in range(len(row_ind)):
-            ious += iou_matrix[row_ind[i], col_ind[i]]
+#         # Calculate the overall IoU
+#         ious = 0
+#         for i in range(len(row_ind)):
+#             ious += iou_matrix[row_ind[i], col_ind[i]]
 
-        n_pairs = len(row_ind)
-        n_instances = len(row_ind) + (num_boxes_a - n_pairs) + (num_boxes_b - n_pairs)
-        ious /= n_instances
+#         n_pairs = len(row_ind)
+#         n_instances = len(row_ind) + (num_boxes_a - n_pairs) + (num_boxes_b - n_pairs)
+#         ious /= n_instances
 
-        iou_loss = 1 - ious
-        return iou_loss
+#         iou_loss = 1 - ious
+#         return iou_loss

@@ -1,12 +1,8 @@
-from .ftvsr import FTVSR
-from .basicvsr_plusplus import BasicVSRPlusPlus
-from .basicvsr import BasicVSR
+from .dcvc_hem import DCVC_HEM
 
 
 _MODEL_ARCHITECTURES = {
-    "FTVSR": FTVSR,
-    "BasicVSR": BasicVSR,
-    "BasicVSRPlusPlus": BasicVSRPlusPlus
+    "DCVC_HEM": DCVC_HEM,
 }
 
 
