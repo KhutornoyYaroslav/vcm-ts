@@ -88,7 +88,7 @@ def do_train(cfg,
         arguments["epoch"] = epoch + 1
 
         # Create progress bar
-        print(('\n' + '%12s' * 7) % ('Epoch', 'gpu_mem', 'lr', 'loss', 'bpp', 'mse', 'ssim'))
+        print(('\n' + '%12s' * 8) % ('Epoch', 'gpu_mem', 'lr', 'loss', 'bpp', 'mse', 'psnr', 'ssim'))
         
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
@@ -153,12 +153,13 @@ def do_train(cfg,
 
             # Update progress bar
             mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-            s = ('%12s' * 2 + '%12.4g' * 5) % ('%g/%g' % (epoch, cfg.SOLVER.MAX_EPOCH - 1),
+            s = ('%12s' * 2 + '%12.4g' * 6) % ('%g/%g' % (epoch, cfg.SOLVER.MAX_EPOCH - 1),
                                                mem,
                                                optimizer.param_groups[0]["lr"],
                                                stats['loss_sum'] / (iteration + 1),
                                                stats['bpp_sum'] / (iteration + 1),
                                                stats['mse_sum'] / (iteration + 1),
+                                               10 * np.log10(1.0 / (stats['mse_sum'] / (iteration + 1))),
                                                stats['ssim_sum'] / (iteration + 1)
                                                )
             pbar.set_description(s)
