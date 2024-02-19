@@ -27,7 +27,7 @@ def do_eval(cfg, model, distributed, **kwargs):
     return result_dict
 
 
-def create_tensorboard_image(seq_idx: int, lrs, hrs, preds, frame_idx: int = 0): # (N, T, C, H, W)
+def create_tensorboard_image(seq_idx: int, lrs, hrs, preds, frame_idx: int = 0):  # (N, T, C, H, W)
     # HRs (originals)
     hrs_ = hrs.detach().to('cpu')
     hrs_seq = hrs_[seq_idx]
@@ -78,7 +78,7 @@ def do_train(cfg,
     start_epoch = arguments["epoch"]
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
-    
+
     # Create lambdas tensor
     lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).to(device)
     lambdas.requires_grad = False
@@ -88,8 +88,8 @@ def do_train(cfg,
         arguments["epoch"] = epoch + 1
 
         # Create progress bar
-        print(('\n' + '%12s' * 8) % ('Epoch', 'gpu_mem', 'lr', 'loss', 'bpp', 'mse', 'psnr', 'ssim'))
-        
+        print(('\n' + '%12s' * 5 + '%25s' * 2) % ('Epoch', 'gpu_mem', 'lr', 'loss', 'mse', 'bpp', 'psnr'))
+
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
 
@@ -117,15 +117,15 @@ def do_train(cfg,
         # Iteration loop
         stats = {
             'loss_sum': 0,
-            'bpp_sum': 0,
+            'bpp': 0,
             'mse_sum': 0,
-            'ssim_sum': 0
+            'psnr': 0
         }
- 
+
         for iteration, data_entry in pbar:
             global_step = epoch * iters_per_epoch + iteration
 
-            input, _ = data_entry # (N, T, C, H, W)
+            input, _ = data_entry  # (N, T, C, H, W)
 
             # Forward data to GPU
             input = input.to(device)
@@ -134,16 +134,16 @@ def do_train(cfg,
             outputs = model.forward(input)
 
             # Calculate loss
-            bpp_mean = torch.mean(outputs['bpp'], dim=1) # (N, T) -> (N)
-            mse_mean = torch.mean(outputs['mse'], dim=1) # (N, T) -> (N)
+            bpp_mean = torch.mean(outputs['bpp'], dim=1)  # (N, T) -> (N)
+            mse_mean = torch.mean(outputs['mse'], dim=1)  # (N, T) -> (N)
             loss_mean = bpp_mean + mse_mean * lambdas
             loss = torch.mean(loss_mean)
 
             # Update stats
             stats['loss_sum'] += loss.item()
-            stats['bpp_sum'] += torch.mean(bpp_mean).item()
+            stats['bpp'] += bpp_mean.cpu().detach().numpy()
             stats['mse_sum'] += torch.mean(mse_mean).item()
-            stats['ssim_sum'] += 0.0
+            stats['psnr'] += mse_mean.cpu().detach().numpy()
 
             # Do optimization
             optimizer.zero_grad()
@@ -153,15 +153,18 @@ def do_train(cfg,
 
             # Update progress bar
             mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-            s = ('%12s' * 2 + '%12.4g' * 6) % ('%g/%g' % (epoch, cfg.SOLVER.MAX_EPOCH - 1),
-                                               mem,
-                                               optimizer.param_groups[0]["lr"],
-                                               stats['loss_sum'] / (iteration + 1),
-                                               stats['bpp_sum'] / (iteration + 1),
-                                               stats['mse_sum'] / (iteration + 1),
-                                               10 * np.log10(1.0 / (stats['mse_sum'] / (iteration + 1))),
-                                               stats['ssim_sum'] / (iteration + 1)
-                                               )
+            bpp = stats['bpp'] / (iteration + 1)
+            bpp = [f'{x:.2f}' for x in bpp]
+            psnr = 10 * np.log10(1.0 / (stats['psnr'] / (iteration + 1)))
+            psnr = [f'{x:.1f}' for x in psnr]
+            s = ('%12s' * 2 + '%12.4g' * 3 + '%25s' * 2) % ('%g/%g' % (epoch, cfg.SOLVER.MAX_EPOCH - 1),
+                                                            mem,
+                                                            optimizer.param_groups[0]["lr"],
+                                                            stats['loss_sum'] / (iteration + 1),
+                                                            stats['mse_sum'] / (iteration + 1),
+                                                            ", ".join(bpp),
+                                                            ", ".join(psnr)
+                                                            )
             pbar.set_description(s)
 
         # Update learning rate
@@ -219,7 +222,6 @@ def do_train(cfg,
     checkpointer.save("model_final", **arguments)
 
     return model
-
 
 # TODO:
 # # ################### Best images
