@@ -78,15 +78,17 @@ def do_train(cfg,
     start_epoch = arguments["epoch"]
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
-    lambdas = torch.IntTensor(cfg.SOLVER.LAMBDAS)
-    lambdas = lambdas.to(device)
+    
+    # Create lambdas tensor
+    lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).to(device)
+    lambdas.requires_grad = False
 
     # Epoch loop
     for epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCH):
         arguments["epoch"] = epoch + 1
 
         # Create progress bar
-        print(('\n' + '%12s' * 7) % ('Epoch', 'gpu_mem', 'lr', 'loss', 'bpp', 'psnr', 'ssim'))
+        print(('\n' + '%12s' * 7) % ('Epoch', 'gpu_mem', 'lr', 'loss', 'bpp', 'mse', 'ssim'))
         
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
@@ -116,7 +118,7 @@ def do_train(cfg,
         stats = {
             'loss_sum': 0,
             'bpp_sum': 0,
-            'psnr_sum': 0,
+            'mse_sum': 0,
             'ssim_sum': 0
         }
  
@@ -131,26 +133,22 @@ def do_train(cfg,
             # Do prediction
             outputs = model.forward(input)
 
-            # lambdas = [85, 170] # , 380, 840] # TODO: to config
-            # lambdas = torch.FloatTensor(lambdas).to(input.device)
-
+            # Calculate loss
             bpp_mean = torch.mean(outputs['bpp'], dim=1) # (N, T) -> (N)
             mse_mean = torch.mean(outputs['mse'], dim=1) # (N, T) -> (N)
-
-            loss_mean = bpp_mean + mse_mean * lambdas # TODO: lambdas
-            # loss_mean = bpp_mean
+            loss_mean = bpp_mean + mse_mean * lambdas
             loss = torch.mean(loss_mean)
 
             # Update stats
             stats['loss_sum'] += loss.item()
             stats['bpp_sum'] += torch.mean(bpp_mean).item()
-            stats['psnr_sum'] += torch.mean(mse_mean).item()
+            stats['mse_sum'] += torch.mean(mse_mean).item()
             stats['ssim_sum'] += 0.0
 
             # Do optimization
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             optimizer.step()
 
             # Update progress bar
@@ -160,7 +158,7 @@ def do_train(cfg,
                                                optimizer.param_groups[0]["lr"],
                                                stats['loss_sum'] / (iteration + 1),
                                                stats['bpp_sum'] / (iteration + 1),
-                                               stats['psnr_sum'] / (iteration + 1),
+                                               stats['mse_sum'] / (iteration + 1),
                                                stats['ssim_sum'] / (iteration + 1)
                                                )
             pbar.set_description(s)
