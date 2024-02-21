@@ -33,7 +33,7 @@ def train_model(cfg, args):
     checkpointer = CheckPointer(model, optimizer, scheduler, cfg.OUTPUT_DIR, save_to_disk, logger)
 
     # Init DMC by default weights
-    extra_checkpoint_data = checkpointer.load('pretrained/acmmm2022_video_psnr.pth')
+    # extra_checkpoint_data = checkpointer.load('pretrained/acmmm2022_video_psnr.pth')
     extra_checkpoint_data = checkpointer.load()
     arguments.update(extra_checkpoint_data)
 

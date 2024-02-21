@@ -79,9 +79,9 @@ def do_train(cfg,
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
 
-    # Create lambdas tensor
-    lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).to(device)
-    lambdas.requires_grad = False
+    # # Create lambdas tensor
+    # lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).to(device)
+    # lambdas.requires_grad = False
 
     # Epoch loop
     for epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCH):
@@ -122,6 +122,62 @@ def do_train(cfg,
             'psnr': 0
         }
 
+        # --- machine state ----  TODO: reimplement. This is debug only
+            # TODO:
+            # In state machine depending on stage we must choose:
+            # 1) loss (MOTION, CONTEXTUAL, ALL)
+            # 2) Model modules
+            # 3) p_frames
+            # 4) training strategy (single / cascaded)
+            # 5) learning rage
+
+        # Stage 0 [Single, p_frames = 1, Inter, Dist, 1e-4, 1]
+        model.activate_modules_inter_dist()
+        loss_dist_key = "me_mse"
+        loss_rate_keys = []
+        p_frames = 1
+
+        # Stage 1 [Single, p_frames = 1, Inter, Dist+Rate, 1e-4, 3]
+        # model.activate_modules_inter_dist_rate()
+        # loss_dist_key = "me_mse"
+        # loss_rate_keys = ["bpp_mv_y", "bpp_mv_z"]
+        # p_frames = 1
+
+        # Stage 2 [Single, p_frames = 1, Recon, Dist, 1e-4, 3]
+        # model.activate_modules_recon_dist()
+        # loss_dist_key = "mse"
+        # loss_rate_keys = []
+        # p_frames = 1
+
+        # Stage 3 [Single, p_frames = 1, Recon, Dist+Rate, 1e-4, 3]
+        # model.activate_modules_recon_dist_rate()
+        # loss_dist_key = "mse"
+        # loss_rate_keys = ["bpp_y", "bpp_z"]
+        # p_frames = 1
+
+        # Stage 4 [Single, p_frames = 1, All, Dist+Rate, 1e-4, 6]
+        # model.activate_modules_all()
+        # loss_dist_key = "mse"
+        # loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
+        # p_frames = 1
+
+        # Stage 5 [Dual, p_frames = 2, All, Dist+Rate, 1e-4, 5]
+        # model.activate_modules_all()
+        # loss_dist_key = "mse"
+        # loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
+        # p_frames = 2
+
+        # Stage 6 [Multi, p_frames = 4, All, Dist+Rate, 1e-4, 3]
+        # model.activate_modules_all()
+        # loss_dist_key = "mse"
+        # loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
+        # p_frames = 4
+        # train_method = model.train_single # TODO:
+
+
+        # --- end machine state ----
+
+        total_iterations = 0
         for iteration, data_entry in pbar:
             global_step = epoch * iters_per_epoch + iteration
 
@@ -131,37 +187,26 @@ def do_train(cfg,
             input = input.to(device)
 
             # Do prediction
-            outputs = model.forward(input)
-
-            # Calculate loss
-            bpp_mean = torch.mean(outputs['bpp'], dim=1)  # (N, T) -> (N)
-            mse_mean = torch.mean(outputs['mse'], dim=1)  # (N, T) -> (N)
-            loss_mean = bpp_mean + mse_mean * lambdas
-            loss = torch.mean(loss_mean)
+            outputs = model.train_single(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
+            total_iterations += outputs['single_forwards']
 
             # Update stats
-            stats['loss_sum'] += loss.item()
-            stats['bpp'] += bpp_mean.cpu().detach().numpy()
-            stats['mse_sum'] += torch.mean(mse_mean).item()
-            stats['psnr'] += mse_mean.cpu().detach().numpy()
-
-            # Do optimization
-            optimizer.zero_grad()
-            loss.backward()
-            # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-            optimizer.step()
-
+            stats['loss_sum'] += torch.sum(outputs['loss']).item() # (T-1) -> (1)
+            stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy() # (N, T-1) -> (N)
+            stats['mse_sum'] += 0 # TODO:
+            stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy() # (N, T-1) -> (N)
+  
             # Update progress bar
             mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-            bpp = stats['bpp'] / (iteration + 1)
+            bpp = stats['bpp'] / total_iterations
             bpp = [f'{x:.2f}' for x in bpp]
-            psnr = 10 * np.log10(1.0 / (stats['psnr'] / (iteration + 1)))
+            psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
             s = ('%12s' * 2 + '%12.4g' * 3 + '%25s' * 2) % ('%g/%g' % (epoch, cfg.SOLVER.MAX_EPOCH - 1),
                                                             mem,
                                                             optimizer.param_groups[0]["lr"],
-                                                            stats['loss_sum'] / (iteration + 1),
-                                                            stats['mse_sum'] / (iteration + 1),
+                                                            stats['loss_sum'] / total_iterations,
+                                                            stats['mse_sum'] / total_iterations,
                                                             ", ".join(bpp),
                                                             ", ".join(psnr)
                                                             )
