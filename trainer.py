@@ -25,7 +25,7 @@ def train_model(cfg, args):
 
     # Create optimizer
     optimizer = make_optimizer(cfg, model, args.num_gpus)
-    scheduler = None # make_lr_scheduler(cfg, optimizers['net'])
+    scheduler = None  # no scheduler, lr changes in train function
 
     # Create checkpointer
     arguments = {"epoch": 0}
@@ -34,8 +34,9 @@ def train_model(cfg, args):
 
     # Init DMC by default weights
     # extra_checkpoint_data = checkpointer.load('pretrained/acmmm2022_video_psnr.pth')
-    extra_checkpoint_data = checkpointer.load()
-    arguments.update(extra_checkpoint_data)
+    # extra_checkpoint_data = checkpointer.load()
+    # arguments.update(extra_checkpoint_data)
+    checkpointer.load('pretrained/spynet.pth')
 
     # Train model
     model = do_train(cfg, model, data_loader, optimizer, scheduler, checkpointer, device, arguments, args)
