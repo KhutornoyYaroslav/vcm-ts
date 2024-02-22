@@ -123,19 +123,19 @@ def do_train(cfg,
         }
 
         # --- machine state ----  TODO: reimplement. This is debug only
-            # TODO:
-            # In state machine depending on stage we must choose:
-            # 1) loss (MOTION, CONTEXTUAL, ALL)
-            # 2) Model modules
-            # 3) p_frames
-            # 4) training strategy (single / cascaded)
-            # 5) learning rage
+        # TODO:
+        # In state machine depending on stage we must choose:
+        # 1) loss (MOTION, CONTEXTUAL, ALL)
+        # 2) Model modules
+        # 3) p_frames
+        # 4) training strategy (single / cascaded)
+        # 5) learning rage
 
         # Stage 0 [Single, p_frames = 1, Inter, Dist, 1e-4, 1]
-        model.activate_modules_inter_dist()
-        loss_dist_key = "me_mse"
-        loss_rate_keys = []
-        p_frames = 1
+        # model.activate_modules_inter_dist()
+        # loss_dist_key = "me_mse"
+        # loss_rate_keys = []
+        # p_frames = 1
 
         # Stage 1 [Single, p_frames = 1, Inter, Dist+Rate, 1e-4, 3]
         # model.activate_modules_inter_dist_rate()
@@ -168,12 +168,11 @@ def do_train(cfg,
         # p_frames = 2
 
         # Stage 6 [Multi, p_frames = 4, All, Dist+Rate, 1e-4, 3]
-        # model.activate_modules_all()
-        # loss_dist_key = "mse"
-        # loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
-        # p_frames = 4
+        model.activate_modules_all()
+        loss_dist_key = "mse"
+        loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
+        p_frames = 5
         # train_method = model.train_single # TODO:
-
 
         # --- end machine state ----
 
@@ -187,15 +186,16 @@ def do_train(cfg,
             input = input.to(device)
 
             # Do prediction
-            outputs = model.train_single(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
+            # outputs = model.train_single(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
+            outputs = model.train_cascade(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
             total_iterations += outputs['single_forwards']
 
             # Update stats
-            stats['loss_sum'] += torch.sum(outputs['loss']).item() # (T-1) -> (1)
-            stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy() # (N, T-1) -> (N)
-            stats['mse_sum'] += 0 # TODO:
-            stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy() # (N, T-1) -> (N)
-  
+            stats['loss_sum'] += torch.sum(outputs['loss']).item()  # (T-1) -> (1)
+            stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
+            stats['mse_sum'] += 0  # TODO:
+            stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
+
             # Update progress bar
             mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
             bpp = stats['bpp'] / total_iterations
