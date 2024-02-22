@@ -1,3 +1,5 @@
+import copy
+
 import torch
 import argparse
 from DCVC_HEM.src.models.video_model import DMC
@@ -5,7 +7,7 @@ from DCVC_HEM.src.models.video_model import DMC
 
 def save_weights(weights_path: str, out_path: str):
     no_weights_model = DMC()
-    weights_model = DMC()
+    weights_model = copy.deepcopy(no_weights_model)
 
     # load model weights
     weights = torch.load(weights_path, map_location=torch.device('cpu'))
@@ -25,11 +27,12 @@ def save_weights(weights_path: str, out_path: str):
     # check that weights for spynet was loaded
     old_params = {}
     for name, param in no_weights_model.named_parameters():
-        if 'optic_flow' in name:
-            old_params[name] = param
+        old_params[name] = param
     for name, param in weights_model.named_parameters():
         if 'optic_flow' in name:
             assert torch.all(torch.not_equal(old_params[name], param))
+        else:
+            assert torch.all(torch.eq(old_params[name], param))
 
     return new_state_dict
 
