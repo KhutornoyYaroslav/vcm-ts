@@ -47,6 +47,85 @@ def create_tensorboard_image(seq_idx: int, lrs, hrs, preds, frame_idx: int = 0):
     return save_img
 
 
+def get_stage_params(cfg,
+                     model,
+                     optimizer,
+                     epoch):
+    # Assert stage count
+    assert (len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.PARTS)
+            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.LOSS_TYPE)
+            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.LOSS_DIST)
+            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.LOSS_RATE)
+            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.LR)
+            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.EPOCHS))
+
+    # Stage
+    epoch_counter = 0
+    for i in range(len(cfg.SOLVER.EPOCHS)):
+        epoch_counter += cfg.SOLVER.EPOCHS[i]
+        if epoch >= epoch_counter:
+            continue
+        stage = i
+        break
+
+    # P-frames number
+    if cfg.SOLVER.STAGES[stage] == 'single':
+        p_frames = 1
+    elif cfg.SOLVER.STAGES[stage] == 'dual':
+        p_frames = 2
+    elif cfg.SOLVER.STAGES[stage] == 'multi':
+        p_frames = 4
+    else:
+        raise SystemError('Invalid stage')
+
+    # Modules to train
+    if cfg.SOLVER.PARTS[stage] == 'inter' and cfg.SOLVER.LOSS_RATE[stage] == 'none':
+        model.activate_modules_inter_dist()
+    elif cfg.SOLVER.PARTS[stage] == 'inter' and cfg.SOLVER.LOSS_RATE[stage] == 'me':
+        model.activate_modules_inter_dist_rate()
+    elif cfg.SOLVER.PARTS[stage] == 'recon' and cfg.SOLVER.LOSS_RATE[stage] == 'none':
+        model.activate_modules_recon_dist()
+    elif cfg.SOLVER.PARTS[stage] == 'recon' and cfg.SOLVER.LOSS_RATE[stage] == 'rec':
+        model.activate_modules_recon_dist_rate()
+    elif cfg.SOLVER.PARTS[stage] == 'all' and cfg.SOLVER.LOSS_RATE[stage] == 'all':
+        model.activate_modules_all()
+    else:
+        raise SystemError('Invalid pair of part and loss rate')
+
+    # Train method
+    if cfg.SOLVER.LOSS_TYPE[stage] == 'single':
+        train_method = model.train_single
+    elif cfg.SOLVER.LOSS_TYPE[stage] == 'cascade':
+        train_method = model.train_cascade
+    else:
+        raise SystemError('Invalid loss type')
+
+    # Loss dist key
+    if cfg.SOLVER.LOSS_DIST[stage] == 'me':
+        loss_dist_key = "me_mse"
+    elif cfg.SOLVER.LOSS_DIST[stage] == 'rec':
+        loss_dist_key = "mse"
+    else:
+        raise SystemError('Invalid loss dist')
+
+    # Loss rate keys
+    if cfg.SOLVER.LOSS_RATE[stage] == 'none':
+        loss_rate_keys = []
+    elif cfg.SOLVER.LOSS_RATE[stage] == 'me':
+        loss_rate_keys = ["bpp_mv_y", "bpp_mv_z"]
+    elif cfg.SOLVER.LOSS_RATE[stage] == 'rec':
+        loss_rate_keys = ["bpp_y", "bpp_z"]
+    elif cfg.SOLVER.LOSS_RATE[stage] == 'all':
+        loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
+    else:
+        raise SystemError('Invalid loss rate')
+
+    # Learning rate
+    optimizer.param_groups[0]["lr"] = cfg.SOLVER.LR[stage]
+
+    return stage, train_method, p_frames, loss_dist_key, loss_rate_keys
+
+
 def do_train(cfg,
              model,
              data_loader,
@@ -79,40 +158,18 @@ def do_train(cfg,
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
 
-    # # Create lambdas tensor
-    # lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).to(device)
-    # lambdas.requires_grad = False
-
     # Epoch loop
     for epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCH):
         arguments["epoch"] = epoch + 1
 
         # Create progress bar
-        print(('\n' + '%12s' * 5 + '%25s' * 2) % ('Epoch', 'gpu_mem', 'lr', 'loss', 'mse', 'bpp', 'psnr'))
+        print(('\n' + '%12s' * 6 + '%25s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'mse', 'bpp', 'psnr'))
 
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
 
         # Prepare data for tensorboard
         # best_samples, worst_samples = [], []
-
-        # # Fix SPyNet and EDVR at the beginning
-        # spynet_freeze_epoch = cfg.MODEL.SPYNET_FREEZE_FOR_EPOCHS
-        # if epoch < spynet_freeze_epoch:
-        #     logger.info(f"Weights for 'spynet' freezed for first {spynet_freeze_epoch} epochs")
-        #     for k, v in model.generator.named_parameters():
-        #         if 'spynet' in k:
-        #             v.requires_grad_(False)
-
-        # elif epoch >= spynet_freeze_epoch:
-        #     logger.info(f"Weights for 'spynet' unfreezed")
-        #     for k, v in model.generator.named_parameters():
-        #         if 'spynet' in k:
-        #             v.requires_grad_(True)
-
-        # if cfg.MODEL.ARCHITECTURE in ['FTVSR']:
-        #     assert model.generator.FTT.dct.dct_conv.weight.requires_grad == False
-        #     assert model.generator.FTT.rdct.reverse_dct_conv.weight.requires_grad == False
 
         # Iteration loop
         stats = {
@@ -122,59 +179,7 @@ def do_train(cfg,
             'psnr': 0
         }
 
-        # --- machine state ----  TODO: reimplement. This is debug only
-        # TODO:
-        # In state machine depending on stage we must choose:
-        # 1) loss (MOTION, CONTEXTUAL, ALL)
-        # 2) Model modules
-        # 3) p_frames
-        # 4) training strategy (single / cascaded)
-        # 5) learning rage
-
-        # Stage 0 [Single, p_frames = 1, Inter, Dist, 1e-4, 1]
-        # model.activate_modules_inter_dist()
-        # loss_dist_key = "me_mse"
-        # loss_rate_keys = []
-        # p_frames = 1
-
-        # Stage 1 [Single, p_frames = 1, Inter, Dist+Rate, 1e-4, 3]
-        # model.activate_modules_inter_dist_rate()
-        # loss_dist_key = "me_mse"
-        # loss_rate_keys = ["bpp_mv_y", "bpp_mv_z"]
-        # p_frames = 1
-
-        # Stage 2 [Single, p_frames = 1, Recon, Dist, 1e-4, 3]
-        # model.activate_modules_recon_dist()
-        # loss_dist_key = "mse"
-        # loss_rate_keys = []
-        # p_frames = 1
-
-        # Stage 3 [Single, p_frames = 1, Recon, Dist+Rate, 1e-4, 3]
-        # model.activate_modules_recon_dist_rate()
-        # loss_dist_key = "mse"
-        # loss_rate_keys = ["bpp_y", "bpp_z"]
-        # p_frames = 1
-
-        # Stage 4 [Single, p_frames = 1, All, Dist+Rate, 1e-4, 6]
-        # model.activate_modules_all()
-        # loss_dist_key = "mse"
-        # loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
-        # p_frames = 1
-
-        # Stage 5 [Dual, p_frames = 2, All, Dist+Rate, 1e-4, 5]
-        # model.activate_modules_all()
-        # loss_dist_key = "mse"
-        # loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
-        # p_frames = 2
-
-        # Stage 6 [Multi, p_frames = 4, All, Dist+Rate, 1e-4, 3]
-        model.activate_modules_all()
-        loss_dist_key = "mse"
-        loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
-        p_frames = 5
-        # train_method = model.train_single # TODO:
-
-        # --- end machine state ----
+        stage, train_method, p_frames, loss_dist_key, loss_rate_keys = get_stage_params(cfg, model, optimizer, epoch)
 
         total_iterations = 0
         for iteration, data_entry in pbar:
@@ -186,8 +191,7 @@ def do_train(cfg,
             input = input.to(device)
 
             # Do prediction
-            # outputs = model.train_single(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
-            outputs = model.train_cascade(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
+            outputs = train_method(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
             total_iterations += outputs['single_forwards']
 
             # Update stats
@@ -202,7 +206,8 @@ def do_train(cfg,
             bpp = [f'{x:.2f}' for x in bpp]
             psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
-            s = ('%12s' * 2 + '%12.4g' * 3 + '%25s' * 2) % ('%g/%g' % (epoch, cfg.SOLVER.MAX_EPOCH - 1),
+            s = ('%12s' * 3 + '%12.4g' * 3 + '%25s' * 2) % ('%g/%g' % (epoch, cfg.SOLVER.MAX_EPOCH - 1),
+                                                            ('%g' % stage),
                                                             mem,
                                                             optimizer.param_groups[0]["lr"],
                                                             stats['loss_sum'] / total_iterations,

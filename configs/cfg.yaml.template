@@ -17,8 +17,14 @@ MODEL:
 OUTPUT_DIR: outputs/test
 SOLVER:
   LAMBDAS: [85, 170, 380, 840]
-  LR: 0.0001
-  MAX_EPOCH: 128
+  STAGES: ['single', 'single', 'single', 'single', 'single', 'dual', 'multi', 'multi', 'multi', 'multi']
+  PARTS: ['inter', 'inter', 'recon', 'recon', 'all', 'all', 'all', 'all', 'all', 'all']
+  LOSS_TYPE: ['single', 'single', 'single', 'single', 'single', 'single', 'single', 'single', 'cascade', 'cascade']
+  LOSS_DIST: ['me', 'me', 'rec', 'rec', 'rec', 'rec', 'rec', 'rec', 'rec', 'rec']
+  LOSS_RATE: ['none', 'me', 'none', 'rec', 'all', 'all', 'all', 'all', 'all', 'all']
+  LR: [0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.00001, 0.00005, 0.00001]
+  EPOCHS: [1, 3, 3, 3, 6, 5, 3, 1, 2, 3]
+  MAX_EPOCH: 30
 TENSORBOARD:
   BEST_SAMPLES_NUM: 16
   WORST_SAMPLES_NUM: 16

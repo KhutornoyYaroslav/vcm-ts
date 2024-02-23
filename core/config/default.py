@@ -41,11 +41,15 @@ _CFG.DATA_LOADER.PIN_MEMORY = True
 # Solver
 # ---------------------------------------------------------------------------- #
 _CFG.SOLVER = CN()
-_CFG.SOLVER.MAX_EPOCH = 128
-_CFG.SOLVER.LR = 2e-4
 _CFG.SOLVER.LAMBDAS = [85, 170, 380, 840]
-# _CFG.SOLVER.LR_SPYNET = 1e-5
-# _CFG.SOLVER.PERCEPTION_LOSS_WEIGHT = 0.01
+_CFG.SOLVER.STAGES = ['single', 'single', 'single', 'single', 'single', 'dual', 'multi', 'multi', 'multi', 'multi']
+_CFG.SOLVER.PARTS = ['inter', 'inter', 'recon', 'recon', 'all', 'all', 'all', 'all', 'all', 'all']
+_CFG.SOLVER.LOSS_TYPE = ['single', 'single', 'single', 'single', 'single', 'single', 'single', 'single', 'cascade', 'cascade']
+_CFG.SOLVER.LOSS_DIST = ['me', 'me', 'rec', 'rec', 'rec', 'rec', 'rec', 'rec', 'rec', 'rec']
+_CFG.SOLVER.LOSS_RATE = ['none', 'me', 'none', 'rec', 'all', 'all', 'all', 'all', 'all', 'all']
+_CFG.SOLVER.LR = [0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.00001, 0.00005, 0.00001]
+_CFG.SOLVER.EPOCHS = [1, 3, 3, 3, 6, 5, 3, 1, 2, 3]
+_CFG.SOLVER.MAX_EPOCH = 30
 
 # ---------------------------------------------------------------------------- #
 # Output options
