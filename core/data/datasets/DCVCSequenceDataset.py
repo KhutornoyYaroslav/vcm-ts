@@ -17,21 +17,28 @@ from ..transforms.transforms import (
 
 
 class DCVCSequenceDataset(Dataset):
-    def __init__(self, root_dir, cfg, is_train: bool = True, to_tensor: bool = True):
+    def __init__(self, root_dir, cfg, dir_list: str = '', is_train: bool = True, to_tensor: bool = True):
         self.cfg = cfg
         self.root_dir = root_dir
+        self.dir_list = dir_list
         self.divisible_by = cfg.INPUT.MAKE_DIVISIBLE_BY
         self.inputs_dirname_template = cfg.DATASET.SUBDIR_INPUTS
         self.seq_length = cfg.DATASET.SEQUENCE_LENGTH
         self.seq_stride = cfg.DATASET.SEQUENCE_STRIDE
-        self.sequences = self.read_sequences(self.root_dir, self.seq_length * self.seq_stride)
+        self.sequences = self.read_sequences(self.root_dir, self.dir_list, self.seq_length * self.seq_stride)
         self.transforms = self.build_transforms(cfg.INPUT.IMAGE_SIZE, self.divisible_by, is_train, to_tensor)
 
     def __len__(self):
         return len(self.sequences)
     
-    def read_sequences(self, root: str, min_length: int):
-        seqs = sorted(glob(root + "/*/*"))
+    def read_sequences(self, root: str, dir_list: str, min_length: int):
+        if dir_list == '':
+            seqs = sorted(glob(root + "/*/*"))
+        else:
+            with open(dir_list, 'r') as f:
+                seqs = []
+                for line in f:
+                    seqs.append(root + "/" + line.strip())
 
         seqs_filtered = []
         for s in seqs:

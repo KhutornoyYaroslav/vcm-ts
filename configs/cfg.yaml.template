@@ -3,7 +3,9 @@ DATASET:
   SEQUENCE_STRIDE: 1
   SUBDIR_INPUTS: ''
   TEST_ROOT_DIRS: []
-  TRAIN_ROOT_DIRS: []
+  TEST_LIST: []
+  TRAIN_ROOT_DIRS: ['path/to/dir']
+  TRAIN_LIST: ['path/to/txt']
   TYPE: DCVCSequenceDataset
 DATA_LOADER:
   NUM_WORKERS: 8

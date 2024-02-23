@@ -20,7 +20,8 @@ def main():
     cfg.freeze()
 
     # Check dataset
-    datasets = build_dataset(cfg.DATASET.TYPE, cfg.DATASET.TRAIN_ROOT_DIRS[0], cfg, is_train=True)
+    datasets = build_dataset(cfg.DATASET.TYPE, cfg.DATASET.TRAIN_ROOT_DIRS[0], cfg, cfg.DATASET.TRAIN_LIST[0], True)
+    print('Sequences length = ' + str(len(datasets.sequences)))
     datasets.visualize(25)
 
 

@@ -32,13 +32,15 @@ def make_data_loader(cfg, is_train: bool = True) -> DataLoader:
 
     if is_train:
         cfg_dataset_dirs = cfg.DATASET.TRAIN_ROOT_DIRS
+        cfg_dataset_lists = cfg.DATASET.TRAIN_LIST
     else:
         cfg_dataset_dirs = cfg.DATASET.TEST_ROOT_DIRS
+        cfg_dataset_lists = cfg.DATASET.TEST_LIST
 
     # Create datasets
     datasets = []
-    for root_dir in cfg_dataset_dirs:
-        dataset = build_dataset(cfg.DATASET.TYPE, root_dir, cfg, is_train=is_train)
+    for i, root_dir in enumerate(cfg_dataset_dirs):
+        dataset = build_dataset(cfg.DATASET.TYPE, root_dir, cfg, cfg_dataset_lists[i], is_train=is_train)
         logger.info("Loaded dataset from '{0}'. Size: {1}".format(root_dir, len(dataset)))
         datasets.append(dataset)
     dataset = ConcatDataset(datasets)

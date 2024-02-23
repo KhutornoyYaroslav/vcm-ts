@@ -8,6 +8,6 @@ _DATASET_TYPES = {
 }
 
 
-def build_dataset(type, root_dir, cfg, is_train):
+def build_dataset(type, root_dir, cfg, dir_list, is_train):
     dataset = _DATASET_TYPES[type]
-    return dataset(root_dir, cfg, is_train)
+    return dataset(root_dir, cfg, dir_list, is_train)
