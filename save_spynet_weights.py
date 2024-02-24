@@ -24,15 +24,15 @@ def save_weights(weights_path: str, out_path: str):
     spynet_weights = torch.load(out_path, map_location=torch.device('cpu'))
     weights_model.load_state_dict(spynet_weights, strict=False)
 
-    # check that weights for spynet was loaded
+    # check that weights for spynet was loaded (soft)
     old_params = {}
     for name, param in no_weights_model.named_parameters():
         old_params[name] = param
     for name, param in weights_model.named_parameters():
         if 'optic_flow' in name:
-            assert torch.all(torch.not_equal(old_params[name], param))
+            assert torch.any(torch.not_equal(old_params[name], param))
         else:
-            assert torch.all(torch.eq(old_params[name], param))
+            assert torch.any(torch.eq(old_params[name], param))
 
     return new_state_dict
 

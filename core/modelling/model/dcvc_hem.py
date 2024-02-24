@@ -109,7 +109,12 @@ class DCVC_HEM(nn.Module):
                 N is equal to number of global quantization steps.
             optimizer : torch.optim.Optimizer
                 Optimizer to train model.
-            # TODO: add other params
+            loss_dist_key: str
+                Loss dist key for output dictionary
+            loss_rate_keys: List[str]
+                Loss rate keys for output dictionary
+            p_frames: int
+                Number of p-frames
         """
         n, t, c, h, w = input.shape
         assert 0 < p_frames < t
@@ -187,7 +192,12 @@ class DCVC_HEM(nn.Module):
                 N is equal to number of global quantization steps.
             optimizer : torch.optim.Optimizer
                 Optimizer to train model.
-            # TODO: add other params
+            loss_dist_key: str
+                Loss dist key for output dictionary
+            loss_rate_keys: List[str]
+                Loss rate keys for output dictionary
+            p_frames: int
+                Number of p-frames
         """
         n, t, c, h, w = input.shape
         assert 0 < p_frames < t
@@ -221,6 +231,7 @@ class DCVC_HEM(nn.Module):
                                                     dpb,
                                                     self.dmc.mv_y_q_scale,
                                                     self.dmc.y_q_scale)
+                dpb = output['dpb']
 
                 # Calculate loss
                 rate = torch.zeros_like(self.lambdas)
@@ -235,14 +246,14 @@ class DCVC_HEM(nn.Module):
                 dist_list.append(dist)
                 loss_list.append(rate + dist * labmdas)
 
-            rate = torch.stack(rate_list, -1)  # (N, T)
-            rate = torch.mean(rate, -1)  # (N, T) -> (N)
+            rate = torch.stack(rate_list, -1)  # (N, p_frames)
+            rate = torch.mean(rate, -1)  # (N, p_frames) -> (N)
 
-            dist = torch.stack(dist_list, -1)  # (N, T)
-            dist = torch.mean(dist, -1)  # (N, T) -> (N)
+            dist = torch.stack(dist_list, -1)  # (N, p_frames)
+            dist = torch.mean(dist, -1)  # (N, p_frames) -> (N)
 
-            loss = torch.stack(loss_list, -1)  # (N, T)
-            loss = torch.mean(loss, -1)  # (N, T) -> (N)
+            loss = torch.stack(loss_list, -1)  # (N, p_frames)
+            loss = torch.mean(loss, -1)  # (N, p_frames) -> (N)
             loss = torch.mean(loss, -1)  # (N) -> (1)
 
             result['rate'].append(rate)  # (N)

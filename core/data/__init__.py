@@ -32,10 +32,10 @@ def make_data_loader(cfg, is_train: bool = True) -> DataLoader:
 
     if is_train:
         cfg_dataset_dirs = cfg.DATASET.TRAIN_ROOT_DIRS
-        cfg_dataset_lists = cfg.DATASET.TRAIN_LIST
+        cfg_dataset_lists = cfg.DATASET.TRAIN_SUBDIR_LISTS
     else:
         cfg_dataset_dirs = cfg.DATASET.TEST_ROOT_DIRS
-        cfg_dataset_lists = cfg.DATASET.TEST_LIST
+        cfg_dataset_lists = cfg.DATASET.TEST_SUBDIR_LISTS
 
     # Create datasets
     datasets = []

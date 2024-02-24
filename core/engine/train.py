@@ -51,77 +51,80 @@ def get_stage_params(cfg,
                      model,
                      optimizer,
                      epoch):
+    # 0 - stage
+    # 1 - part
+    # 2 - loss type
+    # 3 - loss dist
+    # 4 - loss rate
+    # 5 - lr
+    # 6 - epoch
     # Assert stage count
-    assert (len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.PARTS)
-            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.LOSS_TYPE)
-            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.LOSS_DIST)
-            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.LOSS_RATE)
-            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.LR)
-            and len(cfg.SOLVER.STAGES) == len(cfg.SOLVER.EPOCHS))
+    for stage_params in cfg.SOLVER.STAGES:
+        assert len(stage_params) == 7
 
     # Stage
     epoch_counter = 0
-    for i in range(len(cfg.SOLVER.EPOCHS)):
-        epoch_counter += cfg.SOLVER.EPOCHS[i]
+    for i in range(len(cfg.SOLVER.STAGES)):
+        epoch_counter += int(cfg.SOLVER.STAGES[i][6])
         if epoch >= epoch_counter:
             continue
         stage = i
         break
 
     # P-frames number
-    if cfg.SOLVER.STAGES[stage] == 'single':
+    if cfg.SOLVER.STAGES[stage][0] == 'single':
         p_frames = 1
-    elif cfg.SOLVER.STAGES[stage] == 'dual':
+    elif cfg.SOLVER.STAGES[stage][0] == 'dual':
         p_frames = 2
-    elif cfg.SOLVER.STAGES[stage] == 'multi':
+    elif cfg.SOLVER.STAGES[stage][0] == 'multi':
         p_frames = 4
     else:
         raise SystemError('Invalid stage')
 
     # Modules to train
-    if cfg.SOLVER.PARTS[stage] == 'inter' and cfg.SOLVER.LOSS_RATE[stage] == 'none':
+    if cfg.SOLVER.STAGES[stage][1] == 'inter' and cfg.SOLVER.STAGES[stage][4] == 'none':
         model.activate_modules_inter_dist()
-    elif cfg.SOLVER.PARTS[stage] == 'inter' and cfg.SOLVER.LOSS_RATE[stage] == 'me':
+    elif cfg.SOLVER.STAGES[stage][1] == 'inter' and cfg.SOLVER.STAGES[stage][4] == 'me':
         model.activate_modules_inter_dist_rate()
-    elif cfg.SOLVER.PARTS[stage] == 'recon' and cfg.SOLVER.LOSS_RATE[stage] == 'none':
+    elif cfg.SOLVER.STAGES[stage][1] == 'recon' and cfg.SOLVER.STAGES[stage][4] == 'none':
         model.activate_modules_recon_dist()
-    elif cfg.SOLVER.PARTS[stage] == 'recon' and cfg.SOLVER.LOSS_RATE[stage] == 'rec':
+    elif cfg.SOLVER.STAGES[stage][1] == 'recon' and cfg.SOLVER.STAGES[stage][4] == 'rec':
         model.activate_modules_recon_dist_rate()
-    elif cfg.SOLVER.PARTS[stage] == 'all' and cfg.SOLVER.LOSS_RATE[stage] == 'all':
+    elif cfg.SOLVER.STAGES[stage][1] == 'all' and cfg.SOLVER.STAGES[stage][4] == 'all':
         model.activate_modules_all()
     else:
         raise SystemError('Invalid pair of part and loss rate')
 
     # Train method
-    if cfg.SOLVER.LOSS_TYPE[stage] == 'single':
+    if cfg.SOLVER.STAGES[stage][2] == 'single':
         train_method = model.train_single
-    elif cfg.SOLVER.LOSS_TYPE[stage] == 'cascade':
+    elif cfg.SOLVER.STAGES[stage][2] == 'cascade':
         train_method = model.train_cascade
     else:
         raise SystemError('Invalid loss type')
 
     # Loss dist key
-    if cfg.SOLVER.LOSS_DIST[stage] == 'me':
+    if cfg.SOLVER.STAGES[stage][3] == 'me':
         loss_dist_key = "me_mse"
-    elif cfg.SOLVER.LOSS_DIST[stage] == 'rec':
+    elif cfg.SOLVER.STAGES[stage][3] == 'rec':
         loss_dist_key = "mse"
     else:
         raise SystemError('Invalid loss dist')
 
     # Loss rate keys
-    if cfg.SOLVER.LOSS_RATE[stage] == 'none':
+    if cfg.SOLVER.STAGES[stage][4] == 'none':
         loss_rate_keys = []
-    elif cfg.SOLVER.LOSS_RATE[stage] == 'me':
+    elif cfg.SOLVER.STAGES[stage][4] == 'me':
         loss_rate_keys = ["bpp_mv_y", "bpp_mv_z"]
-    elif cfg.SOLVER.LOSS_RATE[stage] == 'rec':
+    elif cfg.SOLVER.STAGES[stage][4] == 'rec':
         loss_rate_keys = ["bpp_y", "bpp_z"]
-    elif cfg.SOLVER.LOSS_RATE[stage] == 'all':
+    elif cfg.SOLVER.STAGES[stage][4] == 'all':
         loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
     else:
         raise SystemError('Invalid loss rate')
 
     # Learning rate
-    optimizer.param_groups[0]["lr"] = cfg.SOLVER.LR[stage]
+    optimizer.param_groups[0]["lr"] = float(cfg.SOLVER.STAGES[stage][5])
 
     return stage, train_method, p_frames, loss_dist_key, loss_rate_keys
 
@@ -207,7 +210,7 @@ def do_train(cfg,
             psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
             s = ('%12s' * 3 + '%12.4g' * 3 + '%25s' * 2) % ('%g/%g' % (epoch, cfg.SOLVER.MAX_EPOCH - 1),
-                                                            ('%g' % stage),
+                                                            ('%g' % (stage + 1)),
                                                             mem,
                                                             optimizer.param_groups[0]["lr"],
                                                             stats['loss_sum'] / total_iterations,

@@ -3,9 +3,9 @@ DATASET:
   SEQUENCE_STRIDE: 1
   SUBDIR_INPUTS: ''
   TEST_ROOT_DIRS: []
-  TEST_LIST: []
+  TEST_SUBDIR_LISTS: []
   TRAIN_ROOT_DIRS: ['path/to/dir']
-  TRAIN_LIST: ['path/to/txt']
+  TRAIN_SUBDIR_LISTS: ['path/to/txt']
   TYPE: DCVCSequenceDataset
 DATA_LOADER:
   NUM_WORKERS: 8
@@ -19,13 +19,18 @@ MODEL:
 OUTPUT_DIR: outputs/test
 SOLVER:
   LAMBDAS: [85, 170, 380, 840]
-  STAGES: ['single', 'single', 'single', 'single', 'single', 'dual', 'multi', 'multi', 'multi', 'multi']
-  PARTS: ['inter', 'inter', 'recon', 'recon', 'all', 'all', 'all', 'all', 'all', 'all']
-  LOSS_TYPE: ['single', 'single', 'single', 'single', 'single', 'single', 'single', 'single', 'cascade', 'cascade']
-  LOSS_DIST: ['me', 'me', 'rec', 'rec', 'rec', 'rec', 'rec', 'rec', 'rec', 'rec']
-  LOSS_RATE: ['none', 'me', 'none', 'rec', 'all', 'all', 'all', 'all', 'all', 'all']
-  LR: [0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.00001, 0.00005, 0.00001]
-  EPOCHS: [1, 3, 3, 3, 6, 5, 3, 1, 2, 3]
+  STAGES: [
+    ['single', 'inter', 'single', 'me', 'none', '0.0001', '1'],
+    ['single', 'inter', 'single', 'me', 'me', '0.0001', '3'],
+    ['single', 'recon', 'single', 'rec', 'none', '0.0001', '3'],
+    ['single', 'recon', 'single', 'rec', 'rec', '0.0001', '3'],
+    ['single', 'all', 'single', 'rec', 'all', '0.0001', '6'],
+    ['dual', 'all', 'single', 'rec', 'all', '0.0001', '5'],
+    ['multi', 'all', 'single', 'rec', 'all', '0.0001', '3'],
+    ['multi', 'all', 'single', 'rec', 'all', '0.00001', '1'],
+    ['multi', 'all', 'cascade', 'rec', 'all', '0.00005', '2'],
+    ['multi', 'all', 'cascade', 'rec', 'all', '0.00001', '3']
+  ]
   MAX_EPOCH: 30
 TENSORBOARD:
   BEST_SAMPLES_NUM: 16
