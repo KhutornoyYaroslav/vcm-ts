@@ -32,7 +32,7 @@ def save_weights(weights_path: str, out_path: str):
         if 'optic_flow' in name:
             assert torch.any(torch.not_equal(old_params[name], param))
         else:
-            assert torch.any(torch.eq(old_params[name], param))
+            assert torch.all(torch.eq(old_params[name], param))
 
     return new_state_dict
 

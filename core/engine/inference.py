@@ -1,71 +1,42 @@
-import torch
 import logging
+
+import torch
 from tqdm import tqdm
-from core.engine.losses import MSELoss, CharbonnierLoss, FasterRCNNPerceptualLoss
 
 
-def eval_dataset(cfg, model, data_loader, device):
+def eval_dataset(train_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device):
     logger = logging.getLogger("CORE.inference")
-
-    # Create metrics
-    mse_metric = MSELoss(reduction='none')
-    charbonnier_metric = CharbonnierLoss(eps=1e-8)
-    perception_metric = FasterRCNNPerceptualLoss(device)
 
     # Iteration loop
     stats = {
-        'sample_count': 0.0,
-        'loss': 0.0,
-        'mse': 0.0,
-        'perception': 0.0,
-        'charbonnier': 0.0,
+        'loss_sum': 0,
+        'bpp': 0,
+        'mse_sum': 0,
+        'psnr': 0
     }
 
+    sample_count = 0
     for data_entry in tqdm(data_loader):
-        inputs, targets, masks, resids = data_entry # (N, T, C, H, W)
+        input, _ = data_entry  # (N, T, C, H, W)
 
         # Forward images
         with torch.no_grad():
             # Forward data to GPU
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-            # masks = masks.to(device)
-            # resids = resids.to(device)
+            input = input.to(device)
 
             # Do prediction
-            outputs = model(inputs)
-            outputs = torch.clip(outputs, 0.0, 1.0)
+            outputs = train_method(input, None, loss_dist_key, loss_rate_keys, p_frames=p_frames, is_train=False)
 
-            # Calculate loss
-            mse_losses = mse_metric.forward(outputs, targets)
-            charb_losses = charbonnier_metric.forward(outputs, targets)
-            percept_losses = perception_metric.forward(outputs.squeeze(0), targets.squeeze(0))
-
-            # Reduce loss
-            mse_loss = torch.mean(mse_losses)
-            charb_loss = torch.mean(charb_losses)
-            percept_loss = torch.mean(percept_losses)
-
-            # Calculate final loss
-            loss = charb_loss + cfg.SOLVER.PERCEPTION_LOSS_WEIGHT * percept_loss
-
-        stats['loss'] += loss.item()
-        stats['mse'] += mse_loss.item()
-        stats['charbonnier'] += charb_loss.item()
-        stats['perception'] += percept_loss.item()
-        stats['sample_count'] += 1
+        stats['loss_sum'] += torch.sum(outputs['loss']).item()  # (T-1) -> (1)
+        stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
+        stats['mse_sum'] += 0  # TODO:
+        stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
+        sample_count += outputs['single_forwards']
 
     # Return results
-    stats['loss'] /= stats['sample_count']
-    stats['mse'] /= stats['sample_count']
-    stats['charbonnier'] /= stats['sample_count']
-    stats['perception'] /= stats['sample_count']
+    stats['loss_sum'] /= sample_count
+    stats['bpp'] /= sample_count
+    stats['mse_sum'] /= sample_count
+    stats['psnr'] /= sample_count
 
-    result_dict = {
-        'loss': stats['loss'],
-        'mse': stats['mse'],
-        'charbonnier': stats['charbonnier'],
-        'perception': stats['perception'],
-    }
-
-    return result_dict
+    return stats

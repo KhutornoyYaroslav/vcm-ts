@@ -93,12 +93,13 @@ class DCVC_HEM(nn.Module):
         for p in self.dmc.parameters():
             p.requires_grad = True
 
-    def train_single(self,
-                     input: torch.Tensor,
-                     optimizer: torch.optim.Optimizer,
-                     loss_dist_key: str,
-                     loss_rate_keys: List[str],
-                     p_frames: int):
+    def forward_single(self,
+                       input: torch.Tensor,
+                       optimizer: torch.optim.Optimizer,
+                       loss_dist_key: str,
+                       loss_rate_keys: List[str],
+                       p_frames: int,
+                       is_train=True):
         """
         Implements single stage training strategy (I -> P frames).
         See: https://arxiv.org/pdf/2111.13850v1.pdf
@@ -115,6 +116,8 @@ class DCVC_HEM(nn.Module):
                 Loss rate keys for output dictionary
             p_frames: int
                 Number of p-frames
+            is_train: bool
+                Train or eval mode
         """
         n, t, c, h, w = input.shape
         assert 0 < p_frames < t
@@ -127,7 +130,7 @@ class DCVC_HEM(nn.Module):
             'single_forwards': 0
         }
 
-        labmdas = self.lambdas if len(loss_rate_keys) else torch.ones_like(self.lambdas)
+        lambdas = self.lambdas if len(loss_rate_keys) else torch.ones_like(self.lambdas)
 
         for t_i in range(0, t - p_frames):
             # Initialize I-frame
@@ -156,14 +159,15 @@ class DCVC_HEM(nn.Module):
                 assert loss_dist_key in output
                 dist = output[loss_dist_key]
 
-                loss = rate + dist * labmdas
+                loss = rate + dist * lambdas
                 loss = torch.mean(loss)  # (N) -> (1)
 
-                # Do optimization
-                optimizer.zero_grad()
-                loss.backward()
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-                optimizer.step()
+                if is_train:
+                    # Do optimization
+                    optimizer.zero_grad()
+                    loss.backward()
+                    # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+                    optimizer.step()
 
                 result['rate'].append(rate)  # (N)
                 result['dist'].append(dist)  # (N)
@@ -176,12 +180,13 @@ class DCVC_HEM(nn.Module):
 
         return result
 
-    def train_cascade(self,
-                      input: torch.Tensor,
-                      optimizer: torch.optim.Optimizer,
-                      loss_dist_key: str,
-                      loss_rate_keys: List[str],
-                      p_frames: int):
+    def forward_cascade(self,
+                        input: torch.Tensor,
+                        optimizer: torch.optim.Optimizer,
+                        loss_dist_key: str,
+                        loss_rate_keys: List[str],
+                        p_frames: int,
+                        is_train=True):
         """
         Implements cascaded loss training strategy (avg loss).
         See: https://arxiv.org/pdf/2111.13850v1.pdf
@@ -198,6 +203,8 @@ class DCVC_HEM(nn.Module):
                 Loss rate keys for output dictionary
             p_frames: int
                 Number of p-frames
+            is_train: bool
+                Train or eval mode
         """
         n, t, c, h, w = input.shape
         assert 0 < p_frames < t
@@ -210,7 +217,7 @@ class DCVC_HEM(nn.Module):
             'single_forwards': 0
         }
 
-        labmdas = self.lambdas if len(loss_rate_keys) else torch.ones_like(self.lambdas)
+        lambdas = self.lambdas if len(loss_rate_keys) else torch.ones_like(self.lambdas)
 
         for t_i in range(0, t - p_frames):
             # Initialize I-frame
@@ -244,7 +251,7 @@ class DCVC_HEM(nn.Module):
 
                 rate_list.append(rate)
                 dist_list.append(dist)
-                loss_list.append(rate + dist * labmdas)
+                loss_list.append(rate + dist * lambdas)
 
             rate = torch.stack(rate_list, -1)  # (N, p_frames)
             rate = torch.mean(rate, -1)  # (N, p_frames) -> (N)
@@ -261,11 +268,12 @@ class DCVC_HEM(nn.Module):
             result['loss'].append(loss)  # (1)
             result['single_forwards'] += 1
 
-            # Do optimization
-            optimizer.zero_grad()
-            loss.backward()
-            # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-            optimizer.step()
+            if is_train:
+                # Do optimization
+                optimizer.zero_grad()
+                loss.backward()
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+                optimizer.step()
 
         result['rate'] = torch.stack(result['rate'], -1)  # (N, T - p_frames)
         result['dist'] = torch.stack(result['dist'], -1)  # (N, T - p_frames)

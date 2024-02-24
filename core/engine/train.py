@@ -13,7 +13,7 @@ from core.engine.losses import CharbonnierLoss, MSELoss, FasterRCNNPerceptualLos
 from torch.utils.tensorboard import SummaryWriter
 
 
-def do_eval(cfg, model, distributed, **kwargs):
+def do_eval(cfg, model, train_method, loss_dist_key, loss_rate_keys, p_frames):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
@@ -21,7 +21,7 @@ def do_eval(cfg, model, distributed, **kwargs):
     data_loader = make_data_loader(cfg, False)
     model.eval()
     device = torch.device(cfg.MODEL.DEVICE)
-    result_dict = eval_dataset(cfg, model, data_loader, device)
+    result_dict = eval_dataset(train_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -97,9 +97,9 @@ def get_stage_params(cfg,
 
     # Train method
     if cfg.SOLVER.STAGES[stage][2] == 'single':
-        train_method = model.train_single
+        train_method = model.forward_single
     elif cfg.SOLVER.STAGES[stage][2] == 'cascade':
-        train_method = model.train_cascade
+        train_method = model.forward_cascade
     else:
         raise SystemError('Invalid loss type')
 
@@ -224,23 +224,30 @@ def do_train(cfg,
         if scheduler is not None:
             scheduler.step()
 
-        # # Do evaluation
-        # if (args.eval_step > 0) and (epoch % args.eval_step == 0) and len(cfg.DATASET.TEST_ROOT_DIRS):
-        #     print('\nEvaluation ...')
-        #     result_dict = do_eval(cfg, model, distributed=args.distributed)
+        # Do evaluation
+        if (args.eval_step > 0) and (epoch % args.eval_step == 0) and len(cfg.DATASET.TEST_ROOT_DIRS):
+            print('\nEvaluation ...')
+            result_dict = do_eval(cfg, model, train_method, loss_dist_key, loss_rate_keys, p_frames)
 
-        #     print(('\n' + 'Evaluation results:' + '%12s' * 4) % ('loss', 'charb_loss', 'perc_loss', 'psnr'))
-        #     psnr = 10 * np.log10(1.0 / (result_dict['mse'] + 1e-9))
-        #     print('                   ' + ('%12.4g' * 4) % (result_dict['loss'], result_dict['charbonnier'], result_dict['perception'], psnr))
+            print(('\n' + 'Evaluation results:' + '%12s' * 2 + '%25s' * 2) % ('loss', 'mse', 'bpp', 'psnr'))
+            bpp = [f'{x:.2f}' for x in result_dict['bpp']]
+            psnr = 10 * np.log10(1.0 / (result_dict['psnr']))
+            psnr = [f'{x:.1f}' for x in psnr]
+            print('                   ' + ('%12.4g' * 2 + '%25s' * 2) %
+                  (result_dict['loss_sum'],
+                  result_dict['mse_sum'],
+                  ", ".join(bpp),
+                  ", ".join(psnr))
+            )
 
-        #     if summary_writer:
-        #         summary_writer.add_scalar('val_losses/loss', result_dict['loss'], global_step=global_step)
-        #         summary_writer.add_scalar('val_losses/charb_loss', result_dict['charbonnier'], global_step=global_step)
-        #         summary_writer.add_scalar('val_losses/perc_loss', result_dict['perception'], global_step=global_step)
-        #         summary_writer.add_scalar('val_losses/psnr', psnr, global_step=global_step)
-        #         summary_writer.flush()
+            # if summary_writer:
+            #     summary_writer.add_scalar('val_losses/loss', result_dict['loss'], global_step=global_step)
+            #     summary_writer.add_scalar('val_losses/charb_loss', result_dict['charbonnier'], global_step=global_step)
+            #     summary_writer.add_scalar('val_losses/perc_loss', result_dict['perception'], global_step=global_step)
+            #     summary_writer.add_scalar('val_losses/psnr', psnr, global_step=global_step)
+            #     summary_writer.flush()
 
-        #     model.train()
+            model.train()
 
         # Save epoch results
         if epoch % args.save_step == 0:

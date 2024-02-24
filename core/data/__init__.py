@@ -39,14 +39,14 @@ def make_data_loader(cfg, is_train: bool = True) -> DataLoader:
 
     # Create datasets
     datasets = []
-    for i, root_dir in enumerate(cfg_dataset_dirs):
-        dataset = build_dataset(cfg.DATASET.TYPE, root_dir, cfg, cfg_dataset_lists[i], is_train=is_train)
+    for root_dir, lists in zip(cfg_dataset_dirs, cfg_dataset_lists):
+        dataset = build_dataset(cfg.DATASET.TYPE, root_dir, cfg, lists, is_train=is_train)
         logger.info("Loaded dataset from '{0}'. Size: {1}".format(root_dir, len(dataset)))
         datasets.append(dataset)
     dataset = ConcatDataset(datasets)
 
     # Create data loader
-    batch_size = len(cfg.SOLVER.LAMBDAS) if is_train else cfg.TEST.BATCH_SIZE
+    batch_size = len(cfg.SOLVER.LAMBDAS)
     shuffle = is_train
     data_loader = create_loader(dataset, shuffle, batch_size, cfg.DATA_LOADER.NUM_WORKERS, cfg.DATA_LOADER.PIN_MEMORY)
 
