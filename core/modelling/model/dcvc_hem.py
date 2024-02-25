@@ -126,7 +126,10 @@ class DCVC_HEM(nn.Module):
         result = {
             'rate': [],  # (N, (T - p_frames) * p_frames)
             'dist': [],  # (N, (T - p_frames) * p_frames)
-            'loss': [],  # (1, (T - p_frames) * p_frames)
+            'loss': [],  # (N, (T - p_frames) * p_frames)
+            'loss_seq': [],  # (N, (T - p_frames) * p_frames)
+            'input_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
+            'decod_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
             'single_forwards': 0
         }
 
@@ -140,6 +143,13 @@ class DCVC_HEM(nn.Module):
                 "ref_y": None,
                 "ref_mv_y": None
             }
+
+            input_seqs = []
+            decod_seqs = []
+            input_seqs.append(input[:, t_i])
+            decod_seqs.append(input[:, t_i])
+
+            loss_list = []
 
             # Forward P-frames
             for p_idx in range(0, p_frames):
@@ -160,23 +170,39 @@ class DCVC_HEM(nn.Module):
                 dist = output[loss_dist_key]
 
                 loss = rate + dist * lambdas
-                loss = torch.mean(loss)  # (N) -> (1)
+                loss_to_opt = torch.mean(loss)  # (N) -> (1)
+
+                loss_list.append(rate + dist * lambdas)
 
                 if is_train:
                     # Do optimization
                     optimizer.zero_grad()
-                    loss.backward()
+                    loss_to_opt.backward()
                     # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
                     optimizer.step()
 
                 result['rate'].append(rate)  # (N)
                 result['dist'].append(dist)  # (N)
-                result['loss'].append(loss)  # (1)
+                result['loss'].append(loss)  # (N)
                 result['single_forwards'] += 1
+                input_seqs.append(input[:, t_i + 1 + p_idx])
+                decod_seqs.append(dpb["ref_frame"])
+
+            loss_seq = torch.stack(loss_list, -1)  # (N, p_frames)
+            loss_seq = torch.mean(loss_seq, -1)  # (N, p_frames) -> (N)
+
+            result['loss_seq'].append(loss_seq)  # (N)
+            result['input_seqs'].append(torch.stack(input_seqs, -1))  # (N, p_frames + 1)
+            result['decod_seqs'].append(torch.stack(decod_seqs, -1))  # (N, p_frames + 1)
 
         result['rate'] = torch.stack(result['rate'], -1)  # (N, (T - p_frames) * p_frames)
         result['dist'] = torch.stack(result['dist'], -1)  # (N, (T - p_frames) * p_frames)
-        result['loss'] = torch.stack(result['loss'], -1)  # ((T - p_frames) * p_frames)
+        result['loss'] = torch.stack(result['loss'], -1)  # (N, (T - p_frames) * p_frames)
+        result['loss_seq'] = torch.stack(result['loss_seq'], -1)  # (N, T - p_frames)
+        result['input_seqs'] = torch.stack(result['input_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
+        result['input_seqs'] = result['input_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+        result['decod_seqs'] = torch.stack(result['decod_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
+        result['decod_seqs'] = result['decod_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
 
         return result
 
@@ -213,7 +239,10 @@ class DCVC_HEM(nn.Module):
         result = {
             'rate': [],  # (N, T - p_frames)
             'dist': [],  # (N, T - p_frames)
-            'loss': [],  # (1, T - p_frames)
+            'loss': [],  # (N, T - p_frames)
+            'loss_seq': [],  # (N, T - p_frames)
+            'input_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
+            'decod_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
             'single_forwards': 0
         }
 
@@ -227,6 +256,11 @@ class DCVC_HEM(nn.Module):
                 "ref_y": None,
                 "ref_mv_y": None
             }
+
+            input_seqs = []
+            decod_seqs = []
+            input_seqs.append(input[:, t_i])
+            decod_seqs.append(input[:, t_i])
 
             rate_list = []
             dist_list = []
@@ -252,6 +286,8 @@ class DCVC_HEM(nn.Module):
                 rate_list.append(rate)
                 dist_list.append(dist)
                 loss_list.append(rate + dist * lambdas)
+                input_seqs.append(input[:, t_i + 1 + p_idx])
+                decod_seqs.append(dpb["ref_frame"])
 
             rate = torch.stack(rate_list, -1)  # (N, p_frames)
             rate = torch.mean(rate, -1)  # (N, p_frames) -> (N)
@@ -261,23 +297,31 @@ class DCVC_HEM(nn.Module):
 
             loss = torch.stack(loss_list, -1)  # (N, p_frames)
             loss = torch.mean(loss, -1)  # (N, p_frames) -> (N)
-            loss = torch.mean(loss, -1)  # (N) -> (1)
+            loss_to_opt = torch.mean(loss, -1)  # (N) -> (1)
 
             result['rate'].append(rate)  # (N)
             result['dist'].append(dist)  # (N)
-            result['loss'].append(loss)  # (1)
+            result['loss'].append(loss)  # (N)
             result['single_forwards'] += 1
+
+            result['input_seqs'].append(torch.stack(input_seqs, -1))  # (N, p_frames + 1)
+            result['decod_seqs'].append(torch.stack(decod_seqs, -1))  # (N, p_frames + 1)
 
             if is_train:
                 # Do optimization
                 optimizer.zero_grad()
-                loss.backward()
+                loss_to_opt.backward()
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
                 optimizer.step()
 
         result['rate'] = torch.stack(result['rate'], -1)  # (N, T - p_frames)
         result['dist'] = torch.stack(result['dist'], -1)  # (N, T - p_frames)
-        result['loss'] = torch.stack(result['loss'], -1)  # (T - p_frames)
+        result['loss'] = torch.stack(result['loss'], -1)  # (N, T - p_frames)
+        result['loss_seq'] = result['loss']  # (N, T - p_frames)
+        result['input_seqs'] = torch.stack(result['input_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
+        result['input_seqs'] = result['input_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+        result['decod_seqs'] = torch.stack(result['decod_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
+        result['decod_seqs'] = result['decod_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
 
         return result
 

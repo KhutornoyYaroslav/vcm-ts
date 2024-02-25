@@ -13,7 +13,7 @@ from core.engine.losses import CharbonnierLoss, MSELoss, FasterRCNNPerceptualLos
 from torch.utils.tensorboard import SummaryWriter
 
 
-def do_eval(cfg, model, train_method, loss_dist_key, loss_rate_keys, p_frames):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
@@ -21,30 +21,10 @@ def do_eval(cfg, model, train_method, loss_dist_key, loss_rate_keys, p_frames):
     data_loader = make_data_loader(cfg, False)
     model.eval()
     device = torch.device(cfg.MODEL.DEVICE)
-    result_dict = eval_dataset(train_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device)
+    result_dict = eval_dataset(forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device, cfg)
 
     torch.cuda.empty_cache()
     return result_dict
-
-
-def create_tensorboard_image(seq_idx: int, lrs, hrs, preds, frame_idx: int = 0):  # (N, T, C, H, W)
-    # HRs (originals)
-    hrs_ = hrs.detach().to('cpu')
-    hrs_seq = hrs_[seq_idx]
-
-    # LRs (downsampled -> bicubic x4)
-    lrs_ = lrs.detach().to('cpu')
-    lrs_seq = lrs_[seq_idx]
-    t, c, h, w = hrs_seq.shape
-    lrs_seq_up = F.interpolate(lrs_seq, size=(w, h), mode='bicubic')
-    lrs_seq_up = torch.clip(lrs_seq_up, 0.0, 1.0)
-
-    # PREDs (predicted)
-    preds_ = preds.detach().to('cpu')
-    preds_seq = preds_[seq_idx]
-
-    save_img = torch.cat([hrs_seq[frame_idx], lrs_seq_up[frame_idx], preds_seq[frame_idx]], dim=2)
-    return save_img
 
 
 def get_stage_params(cfg,
@@ -97,9 +77,9 @@ def get_stage_params(cfg,
 
     # Train method
     if cfg.SOLVER.STAGES[stage][2] == 'single':
-        train_method = model.forward_single
+        forward_method = model.forward_single
     elif cfg.SOLVER.STAGES[stage][2] == 'cascade':
-        train_method = model.forward_cascade
+        forward_method = model.forward_cascade
     else:
         raise SystemError('Invalid loss type')
 
@@ -126,7 +106,7 @@ def get_stage_params(cfg,
     # Learning rate
     optimizer.param_groups[0]["lr"] = float(cfg.SOLVER.STAGES[stage][5])
 
-    return stage, train_method, p_frames, loss_dist_key, loss_rate_keys
+    return stage, forward_method, p_frames, loss_dist_key, loss_rate_keys
 
 
 def do_train(cfg,
@@ -172,7 +152,7 @@ def do_train(cfg,
         pbar = tqdm(pbar, total=len(data_loader))
 
         # Prepare data for tensorboard
-        # best_samples, worst_samples = [], []
+        best_samples, worst_samples = [], []
 
         # Iteration loop
         stats = {
@@ -182,7 +162,7 @@ def do_train(cfg,
             'psnr': 0
         }
 
-        stage, train_method, p_frames, loss_dist_key, loss_rate_keys = get_stage_params(cfg, model, optimizer, epoch)
+        stage, forward_method, p_frames, loss_dist_key, loss_rate_keys = get_stage_params(cfg, model, optimizer, epoch)
 
         total_iterations = 0
         for iteration, data_entry in pbar:
@@ -194,11 +174,11 @@ def do_train(cfg,
             input = input.to(device)
 
             # Do prediction
-            outputs = train_method(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
+            outputs = forward_method(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
             total_iterations += outputs['single_forwards']
 
             # Update stats
-            stats['loss_sum'] += torch.sum(outputs['loss']).item()  # (T-1) -> (1)
+            stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (T-1) -> (1)
             stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
             stats['mse_sum'] += 0  # TODO:
             stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
@@ -227,56 +207,52 @@ def do_train(cfg,
         # Do evaluation
         if (args.eval_step > 0) and (epoch % args.eval_step == 0) and len(cfg.DATASET.TEST_ROOT_DIRS):
             print('\nEvaluation ...')
-            result_dict = do_eval(cfg, model, train_method, loss_dist_key, loss_rate_keys, p_frames)
+            result_dict = do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames)
 
             print(('\n' + 'Evaluation results:' + '%12s' * 2 + '%25s' * 2) % ('loss', 'mse', 'bpp', 'psnr'))
-            bpp = [f'{x:.2f}' for x in result_dict['bpp']]
+            bpp_print = [f'{x:.2f}' for x in result_dict['bpp']]
             psnr = 10 * np.log10(1.0 / (result_dict['psnr']))
-            psnr = [f'{x:.1f}' for x in psnr]
+            psnr_print = [f'{x:.1f}' for x in psnr]
             print('                   ' + ('%12.4g' * 2 + '%25s' * 2) %
                   (result_dict['loss_sum'],
-                  result_dict['mse_sum'],
-                  ", ".join(bpp),
-                  ", ".join(psnr))
-            )
+                   result_dict['mse_sum'],
+                   ", ".join(bpp_print),
+                   ", ".join(psnr_print))
+                  )
 
-            # if summary_writer:
-            #     summary_writer.add_scalar('val_losses/loss', result_dict['loss'], global_step=global_step)
-            #     summary_writer.add_scalar('val_losses/charb_loss', result_dict['charbonnier'], global_step=global_step)
-            #     summary_writer.add_scalar('val_losses/perc_loss', result_dict['perception'], global_step=global_step)
-            #     summary_writer.add_scalar('val_losses/psnr', psnr, global_step=global_step)
-            #     summary_writer.flush()
+            if summary_writer:
+                bpp_dict = {}
+                psnr_dict = {}
+                for i in range(len(cfg.SOLVER.LAMBDAS)):
+                    bpp_dict["bpp_lambda" + str(i + 1)] = result_dict['bpp'][i]
+                    psnr_dict["psnr_lambda" + str(i + 1)] = psnr[i]
+                summary_writer.add_scalar('val_losses/loss', result_dict['loss_sum'], global_step=global_step)
+                # summary_writer.add_scalar('val_losses/mse', result_dict['mse_sum'], global_step=global_step)
+                summary_writer.add_scalars('val_losses/bpp', bpp_dict, global_step=global_step)
+                summary_writer.add_scalars('val_losses/psnr', psnr_dict, global_step=global_step)
+
+                with torch.no_grad():
+                    # Best samples
+                    if len(result_dict['best_samples']):
+                        tb_images = [sample[1] for sample in result_dict['best_samples']]
+                        image_grid = torch.stack(tb_images, dim=0)
+                        image_grid = make_grid(image_grid, nrow=1)
+                        summary_writer.add_image('images/eval_best_samples', image_grid, global_step=global_step)
+
+                    # Worst samples
+                    if len(result_dict['worst_samples']):
+                        tb_images = [sample[1] for sample in result_dict['worst_samples']]
+                        image_grid = torch.stack(tb_images, dim=0)
+                        image_grid = make_grid(image_grid, nrow=1)
+                        summary_writer.add_image('images/eval_worst_samples', image_grid, global_step=global_step)
+
+                summary_writer.flush()
 
             model.train()
 
         # Save epoch results
         if epoch % args.save_step == 0:
             checkpointer.save("model_{:06d}".format(global_step), **arguments)
-
-            # if summary_writer:
-            #     with torch.no_grad():
-            #         # Best samples
-            #         if len(best_samples):
-            #             tb_images = [sample[1] for sample in best_samples]
-            #             image_grid = torch.stack(tb_images, dim=0)
-            #             image_grid = make_grid(image_grid, nrow=1)
-            #             summary_writer.add_image('images/train_best_samples', image_grid, global_step=global_step)
-
-            #         # Worst samples
-            #         if len(worst_samples):
-            #             tb_images = [sample[1] for sample in worst_samples]
-            #             image_grid = torch.stack(tb_images, dim=0)
-            #             image_grid = make_grid(image_grid, nrow=1)
-            #             summary_writer.add_image('images/train_worst_samples', image_grid, global_step=global_step)
-
-            #         summary_writer.add_scalar('losses/loss', loss_sum / (iteration + 1), global_step=global_step)
-            #         summary_writer.add_scalar('losses/charb_loss', charb_loss_sum / (iteration + 1), global_step=global_step)
-            #         summary_writer.add_scalar('losses/percept_loss', percept_loss_sum / (iteration + 1), global_step=global_step)
-            #         # summary_writer.add_scalar('losses/psnr', 10 * np.log10(1.0 / (mse_loss_sum / (cfg.SOLVER.BATCH_SIZE*iteration + 1))), global_step=global_step)
-            #         summary_writer.add_scalar('losses/psnr', 10 * np.log10(1.0 / (mse_loss_sum / (iteration + 1))), global_step=global_step)
-            #         summary_writer.add_scalar('lr', optimizers['net'].param_groups[0]['lr'], global_step=global_step)
-            #         summary_writer.add_scalar('lr_spynet', optimizers['net'].param_groups[1]['lr'], global_step=global_step)
-            #         summary_writer.flush()
 
     # Save final model
     checkpointer.save("model_final", **arguments)
