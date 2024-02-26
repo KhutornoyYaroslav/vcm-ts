@@ -8,6 +8,7 @@ from .validation import eval_dataset
 from torchvision.utils import make_grid
 from core.data import make_data_loader
 from torch.utils.tensorboard import SummaryWriter
+from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
 
 
 def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames):
@@ -187,8 +188,15 @@ def do_train(cfg,
             'loss_sum': 0,
             'bpp': 0,
             'mse_sum': 0,
-            'psnr': 0
+            'psnr': 0,
+            'lr': 0.0,
+            'stage': 0,
+            'best_samples': [],
+            'worst_samples': []
         }
+
+        best_samples = [[] for _ in range(len(cfg.SOLVER.LAMBDAS))]
+        worst_samples = [[] for _ in range(len(cfg.SOLVER.LAMBDAS))]
 
         stage_params = get_stage_params(cfg, model, optimizer, epoch)
 
@@ -231,6 +239,17 @@ def do_train(cfg,
                                                             )
             pbar.set_description(s)
 
+            add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
+
+        stats['loss_sum'] /= total_iterations
+        stats['bpp'] /= total_iterations
+        stats['mse_sum'] /= total_iterations
+        stats['psnr'] /= total_iterations
+        stats['lr'] = optimizer.param_groups[0]["lr"]
+        stats['stage'] = stage_params['stage'] + 1
+        stats['best_samples'] = best_samples
+        stats['worst_samples'] = worst_samples
+
         # Update learning rate
         if scheduler is not None:
             scheduler.step()
@@ -256,37 +275,14 @@ def do_train(cfg,
                    ", ".join(psnr_print))
                   )
 
-            if summary_writer:
-                bpp_dict = {}
-                psnr_dict = {}
-                for i, l in enumerate(cfg.SOLVER.LAMBDAS):
-                    bpp_dict[f"lambda_{l}"] = result_dict['bpp'][i]
-                    psnr_dict[f"lambda_{l}"] = psnr[i]
-                summary_writer.add_scalar('val_losses/loss', result_dict['loss_sum'], global_step=global_step)
-                summary_writer.add_scalars('val_losses/bpp', bpp_dict, global_step=global_step)
-                summary_writer.add_scalars('val_losses/psnr', psnr_dict, global_step=global_step)
-
-                with torch.no_grad():
-                    # Best samples
-                    if len(result_dict['best_samples']):
-                        tb_images = [sample[1] for sample in result_dict['best_samples']]
-                        image_grid = torch.stack(tb_images, dim=0)
-                        image_grid = make_grid(image_grid, nrow=1)
-                        summary_writer.add_image('images/eval_best_samples', image_grid, global_step=global_step)
-
-                    # Worst samples
-                    if len(result_dict['worst_samples']):
-                        tb_images = [sample[1] for sample in result_dict['worst_samples']]
-                        image_grid = torch.stack(tb_images, dim=0)
-                        image_grid = make_grid(image_grid, nrow=1)
-                        summary_writer.add_image('images/eval_worst_samples', image_grid, global_step=global_step)
-
-                summary_writer.flush()
+            add_metrics(cfg, summary_writer, result_dict, global_step, is_train=False)
 
             model.train()
 
         # Save epoch results
         if epoch % args.save_step == 0:
+            add_metrics(cfg, summary_writer, stats, global_step, is_train=True)
+
             checkpointer.save("model_{:06d}".format(global_step), **arguments)
 
     # Save final model
