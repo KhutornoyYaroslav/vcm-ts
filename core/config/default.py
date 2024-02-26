@@ -25,7 +25,9 @@ _CFG.INPUT.IMAGE_SIZE = (256, 256)
 _CFG.DATASET = CN()
 _CFG.DATASET.TYPE = ''
 _CFG.DATASET.TRAIN_ROOT_DIRS = []
+_CFG.DATASET.TRAIN_SUBDIR_LISTS = []
 _CFG.DATASET.TEST_ROOT_DIRS = []
+_CFG.DATASET.TEST_SUBDIR_LISTS = []
 _CFG.DATASET.SEQUENCE_LENGTH = 16
 _CFG.DATASET.SEQUENCE_STRIDE = 1
 _CFG.DATASET.SUBDIR_INPUTS = 'raw'
@@ -41,11 +43,20 @@ _CFG.DATA_LOADER.PIN_MEMORY = True
 # Solver
 # ---------------------------------------------------------------------------- #
 _CFG.SOLVER = CN()
-_CFG.SOLVER.MAX_EPOCH = 128
-_CFG.SOLVER.LR = 2e-4
 _CFG.SOLVER.LAMBDAS = [85, 170, 380, 840]
-# _CFG.SOLVER.LR_SPYNET = 1e-5
-# _CFG.SOLVER.PERCEPTION_LOSS_WEIGHT = 0.01
+_CFG.SOLVER.STAGES = [
+    ['single', 'inter', 'single', 'me', 'none', '0.0001', '1'],
+    ['single', 'inter', 'single', 'me', 'me', '0.0001', '3'],
+    ['single', 'recon', 'single', 'rec', 'none', '0.0001', '3'],
+    ['single', 'recon', 'single', 'rec', 'rec', '0.0001', '3'],
+    ['single', 'all', 'single', 'rec', 'all', '0.0001', '6'],
+    ['dual', 'all', 'single', 'rec', 'all', '0.0001', '5'],
+    ['multi', 'all', 'single', 'rec', 'all', '0.0001', '3'],
+    ['multi', 'all', 'single', 'rec', 'all', '0.00001', '1'],
+    ['multi', 'all', 'cascade', 'rec', 'all', '0.00005', '2'],
+    ['multi', 'all', 'cascade', 'rec', 'all', '0.00001', '3']
+  ]
+_CFG.SOLVER.MAX_EPOCH = 30
 
 # ---------------------------------------------------------------------------- #
 # Output options

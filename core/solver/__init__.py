@@ -90,7 +90,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 def make_optimizer(cfg, model: torch.nn.Module, num_gpus: int = 1) -> torch.optim.Optimizer:
     # Scale by number of GPUs
     lr_scale = num_gpus if (cfg.MODEL.DEVICE == 'cuda') else 1
-    lr = cfg.SOLVER.LR * lr_scale
+    lr = float(cfg.SOLVER.STAGES[0][5]) * lr_scale
 
     # TODO: get params need gradient
 
