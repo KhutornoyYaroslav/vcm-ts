@@ -1,15 +1,12 @@
 import os
-import cv2 as cv
 import torch
 import logging
 import numpy as np
-import torch.nn.functional as F
 from tqdm import tqdm
 from core.utils import dist_util
-from .inference import eval_dataset
+from .validation import eval_dataset
 from torchvision.utils import make_grid
 from core.data import make_data_loader
-from core.engine.losses import CharbonnierLoss, MSELoss, FasterRCNNPerceptualLoss
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -27,86 +24,119 @@ def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames)
     return result_dict
 
 
-def get_stage_params(cfg,
-                     model,
-                     optimizer,
-                     epoch):
-    # 0 - stage
-    # 1 - part
-    # 2 - loss type
-    # 3 - loss dist
-    # 4 - loss rate
-    # 5 - lr
-    # 6 - epoch
-    # Assert stage count
+def calc_max_epoch(cfg):
     for stage_params in cfg.SOLVER.STAGES:
         assert len(stage_params) == 7
 
-    # Stage
     epoch_counter = 0
     for i in range(len(cfg.SOLVER.STAGES)):
         epoch_counter += int(cfg.SOLVER.STAGES[i][6])
-        if epoch >= epoch_counter:
-            continue
-        stage = i
-        break
+
+    return epoch_counter
+
+
+def get_stage_params(cfg,
+                     model: torch.nn.Module,
+                     optimizer: torch.optim.Optimizer,
+                     epoch: int):
+    """
+    Evaluates parameters of current training stage.
+    List of parameters from configuration file for each stage:
+        0 - p_frames
+        1 - trainable modules
+        2 - forward method
+        3 - loss dist
+        4 - loss rate
+        5 - lr
+        6 - epochs
+
+    Parameters:
+        cfg : config
+            Main configuration parameters.
+        model : torch.nn.Module
+            Model to train. Need to change trainable modules.
+        optimizer : torch.optim.Optimizer
+            Optimizer to update model parameters. Need to change learning rate.
+        epoch : int
+            Current epoch.
+
+    Returns:
+        params : dict
+            Dict of current training stage parameters.
+    """
+
+    result = {
+        'stage': None,
+        'p_frames': None,
+        'forward_method': None,
+        'loss_dist_key': None,
+        'loss_rate_keys': None
+    }
+
+    # Check number of stage parameters
+    for stage_params in cfg.SOLVER.STAGES:
+        assert len(stage_params) == 7
+
+    # Get current stage
+    epoch_counter = 0
+    for i in range(len(cfg.SOLVER.STAGES)):
+        epoch_counter += int(cfg.SOLVER.STAGES[i][6])
+        if epoch < epoch_counter:
+            result['stage'] = i
+            break
+
+    stage_params = cfg.SOLVER.STAGES[result['stage']]
 
     # P-frames number
-    if cfg.SOLVER.STAGES[stage][0] == 'single':
-        p_frames = 1
-    elif cfg.SOLVER.STAGES[stage][0] == 'dual':
-        p_frames = 2
-    elif cfg.SOLVER.STAGES[stage][0] == 'multi':
-        p_frames = 4
-    else:
-        raise SystemError('Invalid stage')
+    result['p_frames'] = int(stage_params[0])
+    assert 0 < result['p_frames'] < cfg.DATASET.SEQUENCE_LENGTH, "Invalid 'p_frames' stage parameter"
 
     # Modules to train
-    if cfg.SOLVER.STAGES[stage][1] == 'inter' and cfg.SOLVER.STAGES[stage][4] == 'none':
+    if stage_params[1] == 'me' and stage_params[4] == 'none':
         model.activate_modules_inter_dist()
-    elif cfg.SOLVER.STAGES[stage][1] == 'inter' and cfg.SOLVER.STAGES[stage][4] == 'me':
+    elif stage_params[1] == 'me' and stage_params[4] == 'me':
         model.activate_modules_inter_dist_rate()
-    elif cfg.SOLVER.STAGES[stage][1] == 'recon' and cfg.SOLVER.STAGES[stage][4] == 'none':
+    elif stage_params[1] == 'rec' and stage_params[4] == 'none':
         model.activate_modules_recon_dist()
-    elif cfg.SOLVER.STAGES[stage][1] == 'recon' and cfg.SOLVER.STAGES[stage][4] == 'rec':
+    elif stage_params[1] == 'rec' and stage_params[4] == 'rec':
         model.activate_modules_recon_dist_rate()
-    elif cfg.SOLVER.STAGES[stage][1] == 'all' and cfg.SOLVER.STAGES[stage][4] == 'all':
+    elif stage_params[1] == 'all' and stage_params[4] == 'all':
         model.activate_modules_all()
     else:
         raise SystemError('Invalid pair of part and loss rate')
 
     # Train method
-    if cfg.SOLVER.STAGES[stage][2] == 'single':
-        forward_method = model.forward_single
-    elif cfg.SOLVER.STAGES[stage][2] == 'cascade':
-        forward_method = model.forward_cascade
+    if stage_params[2] == 'single':
+        result['forward_method'] = model.forward_single
+    elif stage_params[2] == 'cascade':
+        result['forward_method'] = model.forward_cascade
     else:
         raise SystemError('Invalid loss type')
 
     # Loss dist key
-    if cfg.SOLVER.STAGES[stage][3] == 'me':
-        loss_dist_key = "me_mse"
-    elif cfg.SOLVER.STAGES[stage][3] == 'rec':
-        loss_dist_key = "mse"
+    if stage_params[3] == 'me':
+        result['loss_dist_key'] = "me_mse"
+    elif stage_params[3] == 'rec':
+        result['loss_dist_key'] = "mse"
     else:
         raise SystemError('Invalid loss dist')
 
     # Loss rate keys
-    if cfg.SOLVER.STAGES[stage][4] == 'none':
-        loss_rate_keys = []
-    elif cfg.SOLVER.STAGES[stage][4] == 'me':
-        loss_rate_keys = ["bpp_mv_y", "bpp_mv_z"]
-    elif cfg.SOLVER.STAGES[stage][4] == 'rec':
-        loss_rate_keys = ["bpp_y", "bpp_z"]
-    elif cfg.SOLVER.STAGES[stage][4] == 'all':
-        loss_rate_keys = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
+    if stage_params[4] == 'none':
+        result['loss_rate_keys'] = []
+    elif stage_params[4] == 'me':
+        result['loss_rate_keys'] = ["bpp_mv_y", "bpp_mv_z"]
+    elif stage_params[4] == 'rec':
+        result['loss_rate_keys'] = ["bpp_y", "bpp_z"]
+    elif stage_params[4] == 'all':
+        result['loss_rate_keys'] = ["bpp_mv_y", "bpp_mv_z", "bpp_y", "bpp_z"]
     else:
         raise SystemError('Invalid loss rate')
 
     # Learning rate
-    optimizer.param_groups[0]["lr"] = float(cfg.SOLVER.STAGES[stage][5])
+    optimizer.param_groups[0]["lr"] = float(stage_params[5])
 
-    return stage, forward_method, p_frames, loss_dist_key, loss_rate_keys
+    return result
 
 
 def do_train(cfg,
@@ -136,13 +166,14 @@ def do_train(cfg,
 
     # Prepare to train
     iters_per_epoch = len(data_loader)
-    total_steps = iters_per_epoch * cfg.SOLVER.MAX_EPOCH
+    max_epoch = calc_max_epoch(cfg)
+    total_steps = iters_per_epoch * max_epoch
     start_epoch = arguments["epoch"]
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
 
     # Epoch loop
-    for epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCH):
+    for epoch in range(start_epoch, max_epoch):
         arguments["epoch"] = epoch + 1
 
         # Create progress bar
@@ -150,9 +181,6 @@ def do_train(cfg,
 
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
-
-        # Prepare data for tensorboard
-        best_samples, worst_samples = [], []
 
         # Iteration loop
         stats = {
@@ -162,19 +190,22 @@ def do_train(cfg,
             'psnr': 0
         }
 
-        stage, forward_method, p_frames, loss_dist_key, loss_rate_keys = get_stage_params(cfg, model, optimizer, epoch)
+        stage_params = get_stage_params(cfg, model, optimizer, epoch)
 
         total_iterations = 0
         for iteration, data_entry in pbar:
             global_step = epoch * iters_per_epoch + iteration
 
+            # Get data
             input, _ = data_entry  # (N, T, C, H, W)
-
-            # Forward data to GPU
             input = input.to(device)
 
-            # Do prediction
-            outputs = forward_method(input, optimizer, loss_dist_key, loss_rate_keys, p_frames=p_frames)
+            # Optimize model
+            outputs = stage_params['forward_method'](input,
+                                                     optimizer,
+                                                     stage_params['loss_dist_key'],
+                                                     stage_params['loss_rate_keys'],
+                                                     stage_params['p_frames'])
             total_iterations += outputs['single_forwards']
 
             # Update stats
@@ -189,8 +220,8 @@ def do_train(cfg,
             bpp = [f'{x:.2f}' for x in bpp]
             psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
-            s = ('%12s' * 3 + '%12.4g' * 3 + '%25s' * 2) % ('%g/%g' % (epoch, cfg.SOLVER.MAX_EPOCH - 1),
-                                                            ('%g' % (stage + 1)),
+            s = ('%12s' * 3 + '%12.4g' * 3 + '%25s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
+                                                            ('%g' % (stage_params['stage'] + 1)),
                                                             mem,
                                                             optimizer.param_groups[0]["lr"],
                                                             stats['loss_sum'] / total_iterations,
@@ -207,7 +238,12 @@ def do_train(cfg,
         # Do evaluation
         if (args.eval_step > 0) and (epoch % args.eval_step == 0) and len(cfg.DATASET.TEST_ROOT_DIRS):
             print('\nEvaluation ...')
-            result_dict = do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames)
+            result_dict = do_eval(cfg,
+                                  model,
+                                  stage_params['forward_method'],
+                                  stage_params['loss_dist_key'],
+                                  stage_params['loss_rate_keys'],
+                                  stage_params['p_frames'])
 
             print(('\n' + 'Evaluation results:' + '%12s' * 2 + '%25s' * 2) % ('loss', 'mse', 'bpp', 'psnr'))
             bpp_print = [f'{x:.2f}' for x in result_dict['bpp']]
@@ -223,11 +259,10 @@ def do_train(cfg,
             if summary_writer:
                 bpp_dict = {}
                 psnr_dict = {}
-                for i in range(len(cfg.SOLVER.LAMBDAS)):
-                    bpp_dict["bpp_lambda" + str(i + 1)] = result_dict['bpp'][i]
-                    psnr_dict["psnr_lambda" + str(i + 1)] = psnr[i]
+                for i, l in enumerate(cfg.SOLVER.LAMBDAS):
+                    bpp_dict[f"lambda_{l}"] = result_dict['bpp'][i]
+                    psnr_dict[f"lambda_{l}"] = psnr[i]
                 summary_writer.add_scalar('val_losses/loss', result_dict['loss_sum'], global_step=global_step)
-                # summary_writer.add_scalar('val_losses/mse', result_dict['mse_sum'], global_step=global_step)
                 summary_writer.add_scalars('val_losses/bpp', bpp_dict, global_step=global_step)
                 summary_writer.add_scalars('val_losses/psnr', psnr_dict, global_step=global_step)
 
@@ -258,54 +293,3 @@ def do_train(cfg,
     checkpointer.save("model_final", **arguments)
 
     return model
-
-# TODO:
-# # ################### Best images
-# if cfg.TENSORBOARD.BEST_SAMPLES_NUM > 0:
-#     with torch.no_grad():
-#         losses_ = charb_losses.detach().clone().to('cpu')
-
-#         # Find best metric
-#         losses_per_seq = torch.mean(losses_, dim=(1, 2, 3, 4))
-#         min_idx = torch.argmin(losses_per_seq).item()
-#         best_loss = losses_per_seq[min_idx].item()
-
-#         # Check if better than existing
-#         need_save, id_to_remove = True, -1
-#         if len(best_samples) >= cfg.TENSORBOARD.BEST_SAMPLES_NUM:
-#             id_to_remove = max(range(len(best_samples)), key=lambda x: best_samples[x][0])
-#             if best_loss > best_samples[id_to_remove][0]:
-#                 need_save = False
-
-#         # Prepare tensorboard image
-#         if need_save:
-#             save_img = create_tensorboard_image(min_idx, inputs, targets, outputs)
-#             if id_to_remove != -1:
-#                 del best_samples[id_to_remove]
-#             best_samples.append((best_loss, save_img))
-# # ###############################
-
-# # ################### Worst images
-# if cfg.TENSORBOARD.WORST_SAMPLES_NUM > 0:
-#     with torch.no_grad():
-#         losses_ = charb_losses.detach().clone().to('cpu')
-
-#         # Find worst metric
-#         losses_per_seq = torch.mean(losses_, dim=(1, 2, 3, 4))
-#         max_idx = torch.argmax(losses_per_seq).item()
-#         worst_loss = losses_per_seq[max_idx].item()
-
-#         # Check if worse than existing
-#         need_save, id_to_remove = True, -1
-#         if len(worst_samples) >= cfg.TENSORBOARD.WORST_SAMPLES_NUM:
-#             id_to_remove = min(range(len(worst_samples)), key=lambda x: worst_samples[x][0])
-#             if worst_loss <= worst_samples[id_to_remove][0]:
-#                 need_save = False
-
-#         # Prepare tensorboard image
-#         if need_save:
-#             save_img = create_tensorboard_image(min_idx, inputs, targets, outputs)
-#             if id_to_remove != -1:
-#                 del worst_samples[id_to_remove]
-#             worst_samples.append((worst_loss, save_img))
-# # ###############################

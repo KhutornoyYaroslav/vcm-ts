@@ -9,7 +9,7 @@ from core.data import make_data_loader
 from core.utils.logger import setup_logger
 from core.modelling.model import build_model
 from core.utils.checkpoint import CheckPointer
-from core.solver import make_optimizer, make_lr_scheduler
+from core.solver import make_optimizer
 
 
 def train_model(cfg, args):
@@ -31,10 +31,7 @@ def train_model(cfg, args):
     arguments = {"epoch": 0}
     save_to_disk = dist_util.is_main_process()
     checkpointer = CheckPointer(model, optimizer, scheduler, cfg.OUTPUT_DIR, save_to_disk, logger)
-
-    # Init DMC by default weights
-    # extra_checkpoint_data = checkpointer.load('pretrained/acmmm2022_video_psnr.pth')
-    extra_checkpoint_data = checkpointer.load('pretrained/spynet.pth')
+    extra_checkpoint_data = checkpointer.load(cfg.MODEL.PRETRAINED_WEIGHTS)
     arguments.update(extra_checkpoint_data)
 
     # Train model
@@ -49,7 +46,7 @@ def str2bool(s):
 
 def main():
     # Create argument parser
-    parser = argparse.ArgumentParser(description='Image/Video Codec Model Training With PyTorch')
+    parser = argparse.ArgumentParser(description='DCVC Video Compression Model Training With PyTorch')
     parser.add_argument("--config-file", dest="config_file", required=False, type=str, default="configs/cfg.yaml",
                         help="Path to config file")
     parser.add_argument('--save-step', dest="save_step", required=False, type=int, default=1,

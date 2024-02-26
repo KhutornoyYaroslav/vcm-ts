@@ -1,10 +1,8 @@
 from .SequenceDataset import SequenceDataset
-from .DCVCSequenceDataset import DCVCSequenceDataset
 
 
 _DATASET_TYPES = {
-    "SequenceDataset": SequenceDataset,
-    "DCVCSequenceDataset": DCVCSequenceDataset,
+    "SequenceDataset": SequenceDataset
 }
 
 
