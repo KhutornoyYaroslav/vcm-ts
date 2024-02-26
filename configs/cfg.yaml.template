@@ -6,32 +6,33 @@ DATASET:
   TEST_SUBDIR_LISTS: []
   TRAIN_ROOT_DIRS: ['path/to/dir']
   TRAIN_SUBDIR_LISTS: ['path/to/txt']
-  TYPE: DCVCSequenceDataset
+  TYPE: SequenceDataset
 DATA_LOADER:
   NUM_WORKERS: 8
   PIN_MEMORY: True
 INPUT:
-  IMAGE_SIZE: [128, 128]
+  IMAGE_SIZE: [256, 256]
   MAKE_DIVISIBLE_BY: 8
 MODEL:
   ARCHITECTURE: DCVC_HEM
   DEVICE: cuda
+  PRETRAINED_WEIGHTS: ''
 OUTPUT_DIR: outputs/test
 SOLVER:
   LAMBDAS: [85, 170, 380, 840]
+  LR: 0.0001
   STAGES: [
-    ['single', 'inter', 'single', 'me', 'none', '0.0001', '1'],
-    ['single', 'inter', 'single', 'me', 'me', '0.0001', '3'],
-    ['single', 'recon', 'single', 'rec', 'none', '0.0001', '3'],
-    ['single', 'recon', 'single', 'rec', 'rec', '0.0001', '3'],
-    ['single', 'all', 'single', 'rec', 'all', '0.0001', '6'],
-    ['dual', 'all', 'single', 'rec', 'all', '0.0001', '5'],
-    ['multi', 'all', 'single', 'rec', 'all', '0.0001', '3'],
-    ['multi', 'all', 'single', 'rec', 'all', '0.00001', '1'],
-    ['multi', 'all', 'cascade', 'rec', 'all', '0.00005', '2'],
-    ['multi', 'all', 'cascade', 'rec', 'all', '0.00001', '3']
+    ['1', 'me', 'single', 'me', 'none', '1e-4', '1'],
+    ['1', 'me', 'single', 'me', 'me', '1e-4', '3'],
+    ['1', 'rec', 'single', 'rec', 'none', '1e-4', '3'],
+    ['1', 'rec', 'single', 'rec', 'rec', '1e-4', '3'],
+    ['1', 'all', 'single', 'rec', 'all', '1e-4', '6'],
+    ['2', 'all', 'single', 'rec', 'all', '1e-4', '5'],
+    ['4', 'all', 'single', 'rec', 'all', '1e-4', '3'],
+    ['4', 'all', 'single', 'rec', 'all', '1e-5', '1'],
+    ['4', 'all', 'cascade', 'rec', 'all', '5e-5', '2'],
+    ['4', 'all', 'cascade', 'rec', 'all', '1e-5', '3']
   ]
-  MAX_EPOCH: 30
 TENSORBOARD:
   BEST_SAMPLES_NUM: 16
   WORST_SAMPLES_NUM: 16

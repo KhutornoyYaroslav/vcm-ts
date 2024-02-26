@@ -2,7 +2,9 @@ import logging
 import os
 import sys
 
+
 console_logging_level = logging.INFO # TODO: 
+
 
 def setup_logger(name, distributed_rank, save_dir=None):
     logger = logging.getLogger(name)

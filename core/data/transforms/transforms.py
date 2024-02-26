@@ -178,3 +178,25 @@ class RandomCrop(object):
             assert resids is None, "Cropping for resids was not implemented"
 
         return inputs, targets, masks, resids
+
+
+class CentralCrop(object):
+    def __init__(self, w: int, h: int, probabilty: float = 0.5):
+        assert w > 0 and h > 0, "Width and height of crop area must be positive"
+        self.crop_w = w
+        self.crop_h = h
+        self.p = np.clip(probabilty, 0.0, 1.0)
+
+    def __call__(self, inputs, targets, masks = None, resids = None):
+        if np.random.choice([0, 1], size=1, p=[1-self.p, self.p]):
+            _, h, w, _ = inputs.shape
+            crop_x = int((w - self.crop_w) / 2)
+            crop_y = int((h - self.crop_h) / 2)
+            assert crop_x >= 0 and crop_y >= 0, "Image size must not be smaller than crop size"
+
+            inputs = inputs[:, crop_y:crop_y + self.crop_h, crop_x:crop_x + self.crop_w, :]
+            targets = targets[:, crop_y:crop_y + self.crop_h, crop_x:crop_x + self.crop_w, :]
+            assert masks is None, "Cropping for masks was not implemented"
+            assert resids is None, "Cropping for resids was not implemented"
+
+        return inputs, targets, masks, resids
