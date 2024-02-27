@@ -154,7 +154,7 @@ class IntraNoAR(CompressionModel):
         params = self.hyper_dec(z_hat)
         q_step, scales, means = self.y_prior_fusion(params).chunk(3, 1)
         # Получение разделённых на 2 канала q и scales???
-        y_q_w_0, y_q_w_1, scales_w_0, scales_w_1, y_hat = self.compress_dual_prior(
+        y_q_w_0, y_q_w_1, scales_w_0, scales_w_1, y_hat, _ = self.compress_dual_prior(
             y, means, scales, q_step, self.y_spatial_prior)
         y_hat = y_hat * curr_q
 

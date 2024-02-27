@@ -98,6 +98,27 @@ def run_test(video_net, i_frame_net, args, device):
     p_frame_number = 0
     overall_p_encoding_time = 0
     overall_p_decoding_time = 0
+    overall_optic_flow_time = 0
+    overall_mv_encoder_time = 0
+    overall_mv_hyper_prior_encoder_time = 0
+    overall_mv_hyper_prior_decoder_time = 0
+    overall_mv_y_prior_fusion_time = 0
+    overall_mv_y_spatial_prior_time = 0
+    overall_mv_decoder_time = 0
+    overall_feature_extractor_time = 0
+    overall_context_fusion_net_time = 0
+    overall_contextual_encoder_time = 0
+    overall_contextual_hyper_prior_encoder_time = 0
+    overall_contextual_hyper_prior_decoder_time = 0
+    overall_temporal_prior_encoder_time = 0
+    overall_y_prior_fusion_time = 0
+    overall_y_spatial_prior_time = 0
+    overall_contextual_decoder_time = 0
+    overall_recon_generation_net_time = 0
+    overall_mv_compress_dual_prior_time = 0
+    overall_motion_compensation_time = 0
+    overall_y_compress_dual_prior_time = 0
+    overall_entropy_coder_time = 0
     with torch.no_grad():  # no_grad() - не перезаписывает веса
         for frame_idx in range(frame_num):
             # Считывание кадра из видео и перенос его на GPU
@@ -152,6 +173,27 @@ def run_test(video_net, i_frame_net, args, device):
                 p_frame_number += 1
                 overall_p_encoding_time += result['encoding_time']
                 overall_p_decoding_time += result['decoding_time']
+                overall_optic_flow_time += result['timings']['optic_flow']
+                overall_mv_encoder_time += result['timings']['mv_encoder']
+                overall_mv_hyper_prior_encoder_time += result['timings']['mv_hyper_prior_encoder']
+                overall_mv_hyper_prior_decoder_time += result['timings']['mv_hyper_prior_decoder']
+                overall_mv_y_prior_fusion_time += result['timings']['mv_y_prior_fusion']
+                overall_mv_y_spatial_prior_time += result['timings']['mv_y_spatial_prior']
+                overall_mv_decoder_time += result['timings']['mv_decoder']
+                overall_feature_extractor_time += result['timings']['feature_extractor']
+                overall_context_fusion_net_time += result['timings']['context_fusion_net']
+                overall_contextual_encoder_time += result['timings']['contextual_encoder']
+                overall_contextual_hyper_prior_encoder_time += result['timings']['contextual_hyper_prior_encoder']
+                overall_contextual_hyper_prior_decoder_time += result['timings']['contextual_hyper_prior_decoder']
+                overall_temporal_prior_encoder_time += result['timings']['temporal_prior_encoder']
+                overall_y_prior_fusion_time += result['timings']['y_prior_fusion']
+                overall_y_spatial_prior_time += result['timings']['y_spatial_prior']
+                overall_contextual_decoder_time += result['timings']['contextual_decoder']
+                overall_recon_generation_net_time += result['timings']['recon_generation_net']
+                overall_mv_compress_dual_prior_time += result['timings']['mv_compress_dual_prior']
+                overall_motion_compensation_time += result['timings']['motion_compensation']
+                overall_y_compress_dual_prior_time += result['timings']['y_compress_dual_prior']
+                overall_entropy_coder_time += result['timings']['entropy_coder']
 
             # Удаление паддингов и подсчёт метрик
             recon_frame = recon_frame.clamp_(0, 1)
@@ -175,6 +217,29 @@ def run_test(video_net, i_frame_net, args, device):
         print(f"encoding/decoding {p_frame_number} P frames, "
               f"average encoding time {overall_p_encoding_time / p_frame_number * 1000:.0f} ms, "
               f"average decoding time {overall_p_decoding_time / p_frame_number * 1000:.0f} ms.")
+        print("average time for NN modules:")
+        print(f"\toptic_flow time {overall_optic_flow_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tmv_encoder time {overall_mv_encoder_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tmv_hyper_prior_encoder time {overall_mv_hyper_prior_encoder_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tmv_hyper_prior_decoder time {overall_mv_hyper_prior_decoder_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tmv_y_prior_fusion time {overall_mv_y_prior_fusion_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tmv_y_spatial_prior time {overall_mv_y_spatial_prior_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tmv_decoder time {overall_mv_decoder_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tfeature_extractor time {overall_feature_extractor_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tcontext_fusion_net time {overall_context_fusion_net_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tcontextual_encoder time {overall_contextual_encoder_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tcontextual_hyper_prior_encoder time {overall_contextual_hyper_prior_encoder_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tcontextual_hyper_prior_decoder time {overall_contextual_hyper_prior_decoder_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\ttemporal_prior_encoder time {overall_temporal_prior_encoder_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\ty_prior_fusion time {overall_y_prior_fusion_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\ty_spatial_prior time {overall_y_spatial_prior_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tcontextual_decoder time {overall_contextual_decoder_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\trecon_generation_net time {overall_recon_generation_net_time / p_frame_number / 1e+6:.2f} ms")
+        print("average time for non NN modules:")
+        print(f"\tmv_compress_dual_prior time {overall_mv_compress_dual_prior_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tmotion_compensation time {overall_motion_compensation_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\ty_compress_dual_prior time {overall_y_compress_dual_prior_time / p_frame_number / 1e+6:.2f} ms")
+        print(f"\tentropy_coder time {overall_entropy_coder_time / p_frame_number / 1e+6:.2f} ms")
 
     log_result = generate_log_json(frame_num, frame_types, bits, psnrs, msssims,
                                    frame_pixel_num, test_time)

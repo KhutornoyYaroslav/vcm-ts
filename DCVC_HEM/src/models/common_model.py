@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 import math
+import time
 
 import torch
 from torch import nn
@@ -28,6 +29,7 @@ class CompressionModel(nn.Module):
 
         self.mse = nn.MSELoss(reduction='none')
         self.ssim = MS_SSIM(data_range=1.0, size_average=False)
+        self.micro_mask = torch.tensor(((1, 0), (0, 1)), dtype=torch.float32, device='cuda:0')
 
     def _initialize_weights(self):
         for m in self.modules():
@@ -81,9 +83,11 @@ class CompressionModel(nn.Module):
             self.bit_estimator_z_mv.update(force=force, entropy_coder=self.entropy_coder)
 
     @staticmethod
-    def get_mask(height, width, device):
-        micro_mask = torch.tensor(((1, 0), (0, 1)), dtype=torch.float32, device=device)
+    def get_mask(height, width, micro_mask: torch.Tensor):
+        mask_start = time.time_ns()
         mask_0 = micro_mask.repeat(height // 2, width // 2)
+        mask_end = time.time_ns()
+        mask = (mask_end - mask_start) / 1e+6
         mask_0 = torch.unsqueeze(mask_0, 0)
         mask_0 = torch.unsqueeze(mask_0, 0)
         mask_1 = torch.ones_like(mask_0) - mask_0
@@ -112,7 +116,7 @@ class CompressionModel(nn.Module):
         device = y.device
         _, _, H, W = y.size()
         # Генерирует маски для кодирования (mask_0 - чётные индексы, mask_1 - нечётные) моделью шахматной доски
-        mask_0, mask_1 = self.get_mask(H, W, device)
+        mask_0, mask_1 = self.get_mask(H, W, self.micro_mask)
 
         # Квантизирует исходные данные и делит их на две части
         quant_step = LowerBound.apply(quant_step, 0.5)
@@ -133,7 +137,9 @@ class CompressionModel(nn.Module):
         # второй половины)
         params = torch.cat((y_hat_0_0, y_hat_1_1, means, scales, quant_step), dim=1)
         # Получение новых параметров на основе предыдущего шага
+        mv_y_spatial_prior_start = time.time_ns()
         scales_0, means_0, scales_1, means_1 = y_spatial_prior(params).chunk(4, 1)
+        mv_y_spatial_prior_end = time.time_ns()
 
         # Второй шаг кодирования моделью шахматной доски
         y_res_0_1, y_q_0_1, y_hat_0_1, scales_hat_0_1 = \
@@ -174,7 +180,7 @@ class CompressionModel(nn.Module):
             y_q_w_1 = y_q_0_1 + y_q_1_0
             scales_w_0 = scales_hat_0_0 + scales_hat_1_1
             scales_w_1 = scales_hat_0_1 + scales_hat_1_0
-            return y_q_w_0, y_q_w_1, scales_w_0, scales_w_1, y_hat
+            return y_q_w_0, y_q_w_1, scales_w_0, scales_w_1, y_hat, mv_y_spatial_prior_end - mv_y_spatial_prior_start
         return y_res, y_q, y_hat, scales_hat
 
     def compress_dual_prior(self, y, means, scales, quant_step, y_spatial_prior):
@@ -184,7 +190,7 @@ class CompressionModel(nn.Module):
         device = means.device
         _, _, H, W = means.size()
         # Генерирует маски для кодирования (mask_0 - чётные индексы, mask_1 - нечётные) моделью шахматной доски
-        mask_0, mask_1 = self.get_mask(H, W, device)
+        mask_0, mask_1 = self.get_mask(H, W, self.micro_mask)
         quant_step = torch.clamp_min(quant_step, 0.5)
 
         # Деление на две части параметров энтропии
