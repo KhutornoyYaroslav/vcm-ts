@@ -127,7 +127,7 @@ class DCVC_HEM(nn.Module):
             'rate': [],  # (N, (T - p_frames) * p_frames)
             'dist': [],  # (N, (T - p_frames) * p_frames)
             'loss': [],  # (N, (T - p_frames) * p_frames)
-            'loss_seq': [],  # (N, (T - p_frames) * p_frames)
+            'loss_seq': [],  # (N, T - p_frames)
             'input_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
             'decod_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
             'single_forwards': 0
