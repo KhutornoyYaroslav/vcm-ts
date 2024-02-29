@@ -90,7 +90,20 @@ class CheckPointer:
         if "optimizer" in checkpoint and self.optimizer:
             self.logger.info("Loading optimizer state dict from {}".format(f))
             try:
-                self.optimizer.load_state_dict(checkpoint.pop("optimizer"))
+                opt_params = checkpoint.pop("optimizer")
+
+                # NOTE: This section is needed to load optimizer state dict
+                # from old torch vesrion format < 1.12 to higher versions
+                occurrences = 0
+                for val in opt_params['state'].values():
+                    if 'step' in val:
+                        if not isinstance(val['step'], torch.Tensor):
+                            val['step'] = torch.tensor(val['step'], dtype=torch.float32)
+                            occurrences += 1
+                if occurrences > 0:
+                    self.logger.warn("Optimizer state steps were converted (int to tensor, {} occurrences)".format(occurrences))
+
+                self.optimizer.load_state_dict(opt_params)
             except ValueError:
                 self.logger.info("Optimizer state dict load failed")
 
