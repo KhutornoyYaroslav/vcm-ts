@@ -92,6 +92,7 @@ def add_metrics(cfg, summary_writer, result_dict, global_step, is_train: bool = 
         bpp_dict[f"lambda_{i + 1}_{l}"] = result_dict['bpp'][i]
         psnr_dict[f"lambda_{i + 1}_{l}"] = psnr[i]
     summary_writer.add_scalar(f'{prefix}_losses/loss', result_dict['loss_sum'], global_step=global_step)
+    summary_writer.add_scalar(f'{prefix}_losses/perceptual_loss', result_dict['perceptual_loss'], global_step=global_step)
     summary_writer.add_scalars(f'{prefix}_losses/bpp', bpp_dict, global_step=global_step)
     summary_writer.add_scalars(f'{prefix}_losses/psnr', psnr_dict, global_step=global_step)
     if is_train:

@@ -4,12 +4,15 @@ import torch
 from tqdm import tqdm
 from core.utils.tensorboard import add_best_and_worst_sample
 
-def eval_dataset(forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device, cfg):
+
+def eval_dataset(forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device, cfg,
+                 perceptual_loss_key):
     logger = logging.getLogger("CORE.inference")
 
     # Iteration loop
     stats = {
         'loss_sum': 0,
+        'perceptual_loss': 0,
         'bpp': 0,
         'mse_sum': 0,
         'psnr': 0,
@@ -29,9 +32,11 @@ def eval_dataset(forward_method, loss_dist_key, loss_rate_keys, p_frames, data_l
             input = input.to(device)
 
             # Do prediction
-            outputs = forward_method(input, None, loss_dist_key, loss_rate_keys, p_frames=p_frames, is_train=False)
+            outputs = forward_method(input, None, loss_dist_key, loss_rate_keys, p_frames=p_frames,
+                                     perceptual_loss_key=perceptual_loss_key, is_train=False)
 
         stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (T-1) -> (1)
+        stats['perceptual_loss'] += torch.mean(outputs['perceptual_loss'], -1).item()  # (T-1) -> (1)
         stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
         stats['mse_sum'] += 0  # TODO:
         stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
@@ -41,6 +46,7 @@ def eval_dataset(forward_method, loss_dist_key, loss_rate_keys, p_frames, data_l
 
     # Return results
     stats['loss_sum'] /= sample_count
+    stats['perceptual_loss'] /= sample_count
     stats['bpp'] /= sample_count
     stats['mse_sum'] /= sample_count
     stats['psnr'] /= sample_count
