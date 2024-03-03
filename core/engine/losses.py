@@ -48,13 +48,11 @@ class VGGPerceptualLoss(torch.nn.Module):
 
 
 class FasterRCNNPerceptualLoss(torch.nn.Module):
-    def __init__(self, device):
+    def __init__(self):
         super(FasterRCNNPerceptualLoss, self).__init__()
         # Create model
         self.pretrained_weights = torchvision.models.detection.FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1
         self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=self.pretrained_weights)
-        self.model.eval()
-        self.to(device)
         # Get features
         self.return_nodes = {
             'body.layer1': 'x4',
@@ -80,4 +78,4 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
             if key in feature_layers:
                 loss += torch.nn.functional.l1_loss(f_input[key], f_target[key])
 
-        return torch.FloatTensor([loss])
+        return loss
