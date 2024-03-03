@@ -9,16 +9,19 @@ import multiprocessing
 import time
 
 import torch
+import torchvision
 import torch.nn.functional as F
 import numpy as np
+import matplotlib.pyplot as plt
 from PIL import Image
-from src.models.video_model import DMC
-from src.models.image_model import IntraNoAR
-from src.utils.common import str2bool, interpolate_log, create_folder, generate_log_json, dump_json
-from src.utils.stream_helper import get_padding_size, get_state_dict
-from src.utils.png_reader import PNGReader
+from DCVC_HEM.src.models.video_model import DMC
+from DCVC_HEM.src.models.image_model import IntraNoAR
+from DCVC_HEM.src.utils.common import str2bool, interpolate_log, create_folder, generate_log_json, dump_json
+from DCVC_HEM.src.utils.stream_helper import get_padding_size, get_state_dict
+from DCVC_HEM.src.utils.png_reader import PNGReader
 from tqdm import tqdm
 from pytorch_msssim import ms_ssim
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 
 def parse_args():
@@ -26,7 +29,6 @@ def parse_args():
 
     parser.add_argument('--i_frame_model_path', type=str)
     parser.add_argument('--i_frame_q_scales', type=float, nargs="+")
-    parser.add_argument("--force_intra", type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument("--force_frame_num", type=int, default=-1)
     parser.add_argument("--force_intra_period", type=int, default=-1)
     parser.add_argument('--model_path',  type=str)
@@ -34,7 +36,6 @@ def parse_args():
     parser.add_argument('--p_frame_mv_y_q_scales', type=float, nargs="+")
     parser.add_argument('--rate_num', type=int, default=4)
     parser.add_argument('--test_config', type=str, required=True)
-    parser.add_argument('--force_root_path', type=str, default=None, required=False)
     parser.add_argument("--worker", "-w", type=int, default=1, help="worker number")
     parser.add_argument("--cuda", type=str2bool, nargs='?', const=True, default=False)
     parser.add_argument("--cuda_device", default=None,
@@ -92,14 +93,14 @@ def run_test(video_net, i_frame_net, args, device):
     psnrs = []
     msssims = []
     bits = []
+    decoded = []
     frame_pixel_num = 0
 
     start_time = time.time()
     p_frame_number = 0
-    overall_p_encoding_time = 0
-    overall_p_decoding_time = 0
+
     with torch.no_grad():  # no_grad() - не перезаписывает веса
-        for frame_idx in range(frame_num):
+        for frame_idx in tqdm(range(frame_num)):
             # Считывание кадра из видео и перенос его на GPU
             frame_start_time = time.time()
             rgb = src_reader.read_one_frame(src_format="rgb")
@@ -150,8 +151,6 @@ def run_test(video_net, i_frame_net, args, device):
                 frame_types.append(1)
                 bits.append(result['bit'])
                 p_frame_number += 1
-                overall_p_encoding_time += result['encoding_time']
-                overall_p_decoding_time += result['decoding_time']
 
             # Удаление паддингов и подсчёт метрик
             recon_frame = recon_frame.clamp_(0, 1)
@@ -160,6 +159,7 @@ def run_test(video_net, i_frame_net, args, device):
             msssim = ms_ssim(x_hat, x, data_range=1).item()
             psnrs.append(psnr)
             msssims.append(msssim)
+            decoded.append(x_hat.cpu())
             frame_end_time = time.time()
 
             if verbose >= 2:
@@ -172,33 +172,14 @@ def run_test(video_net, i_frame_net, args, device):
 
     test_time = time.time() - start_time
     if verbose >= 1 and p_frame_number > 0:
-        print(f"encoding/decoding {p_frame_number} P frames, "
-              f"average encoding time {overall_p_encoding_time / p_frame_number * 1000:.0f} ms, "
-              f"average decoding time {overall_p_decoding_time / p_frame_number * 1000:.0f} ms.")
+        print(f"encoding/decoding {p_frame_number} P frames")
 
     log_result = generate_log_json(frame_num, frame_types, bits, psnrs, msssims,
-                                   frame_pixel_num, test_time)
+                                   frame_pixel_num, test_time, decoded)
     return log_result
 
 
-def encode_one(args, device):
-    # Загрузка весов модели для изображений и её дальнейшая инициализация
-    i_state_dict = get_state_dict(args['i_frame_model_path'])
-    i_frame_net = IntraNoAR()
-    i_frame_net.load_state_dict(i_state_dict, strict=False)
-    i_frame_net = i_frame_net.to(device)
-    i_frame_net.eval()
-
-    # Загрузка весов модели для видео и её дальнейшая инициализация
-    if args['force_intra']:
-        video_net = None
-    else:
-        p_state_dict = get_state_dict(args['model_path'])
-        video_net = DMC()
-        video_net.load_state_dict(p_state_dict, strict=False)
-        video_net = video_net.to(device)
-        video_net.eval()
-
+def encode_one(args, i_frame_net, video_net, device):
     # Подготовка моделей к записи битстрима в бинарные файлы на диск (инициализация арифметических энкодеров)
     if args['write_stream']:
         if video_net is not None:
@@ -208,7 +189,6 @@ def encode_one(args, device):
     # Подготовка аргументов для нейронки
     sub_dir_name = args['video_path']
     gop_size = args['gop']
-    frame_num = args['frame_num']
 
     bin_folder = os.path.join(args['stream_path'], sub_dir_name, str(args['rate_idx']))
     if args['write_stream']:
@@ -223,7 +203,6 @@ def encode_one(args, device):
 
     args['img_path'] = os.path.join(args['dataset_path'], sub_dir_name)
     args['gop_size'] = gop_size
-    args['frame_num'] = frame_num
     args['bin_folder'] = bin_folder
     args['decoded_frame_folder'] = decoded_frame_folder
 
@@ -236,33 +215,53 @@ def encode_one(args, device):
     return result
 
 
-def worker(use_cuda, args):
+def worker(device, i_frame_net, video_net, args):
     torch.backends.cudnn.benchmark = False
     torch.use_deterministic_algorithms(True)
     torch.manual_seed(0)
     torch.set_num_threads(1)
     np.random.seed(seed=0)
-    gpu_num = 0
-    if use_cuda:
-        gpu_num = torch.cuda.device_count()
 
-    process_name = multiprocessing.current_process().name
-    process_idx = int(process_name[process_name.rfind('-') + 1:])
-    gpu_id = -1
-    if gpu_num > 0:
-        gpu_id = process_idx % gpu_num
-    if gpu_id >= 0:
-        device = f"cuda:{gpu_id}"
-    else:
-        device = "cpu"
-
-    result = encode_one(args, device)
+    result = encode_one(args, i_frame_net, video_net, device)
     return result
 
 
-def main():
-    begin_time = time.time()
+def get_original_bboxes(rcnn, args, device):
+    frame_num = args['frame_num']
 
+    # Инициализация читателя изображений
+    if args['src_type'] == 'png':
+        src_reader = PNGReader(args['img_path'], args['src_width'], args['src_height'])
+
+    bboxes = []
+
+    with torch.no_grad():  # no_grad() - не перезаписывает веса
+        for _ in tqdm(range(frame_num)):
+            # Считывание кадра из видео и перенос его на GPU
+            rgb = src_reader.read_one_frame(src_format="rgb")
+            x = np_image_to_tensor(rgb)
+            x = x.to(device)
+
+            output = forward_rcnn(rcnn, x)
+            del x
+            torch.cuda.empty_cache()
+            bboxes.append(output)
+
+    return bboxes
+
+
+def forward_rcnn(rcnn, x):
+    x_cuda = x.to('cuda')  # TODO: Fix
+    output = rcnn(x_cuda)[0]  # batch = 1
+    del x_cuda
+    torch.cuda.empty_cache()
+    output['boxes'] = output['boxes'].cpu()
+    output['labels'] = output['labels'].cpu()
+    output['scores'] = output['scores'].cpu()
+    return output
+
+
+def main():
     torch.backends.cudnn.enabled = True
     args = parse_args()
 
@@ -289,87 +288,85 @@ def main():
     # аргументов либо использует значения из весов, либо заданные вручную, либо интерполирует N значений в заданном
     # промежутке (минимальное и максимальное значения берутся из весов)
     i_frame_q_scales = IntraNoAR.get_q_scales_from_ckpt(args.i_frame_model_path)
-    print("q_scales in intra ckpt: ", end='')
-    for q in i_frame_q_scales:
-        print(f"{q:.3f}, ", end='')
-    print()
     if args.i_frame_q_scales is not None:
         assert len(args.i_frame_q_scales) == rate_num
         i_frame_q_scales = args.i_frame_q_scales
-        print(f"testing {rate_num} rate points with pre-defined intra y q_scales: ", end='')
     elif len(i_frame_q_scales) == rate_num:
-        print(f"testing {rate_num} rate points with intra y q_scales in ckpt: ", end='')
+        pass
     else:
         max_q_scale = i_frame_q_scales[0]
         min_q_scale = i_frame_q_scales[-1]
         i_frame_q_scales = interpolate_log(min_q_scale, max_q_scale, rate_num)
-        print(f"testing {rate_num} rates, using intra y q_scales: ", end='')
-
-    for q in i_frame_q_scales:
-        print(f"{q:.3f}, ", end='')
-    print()
 
     # Аналогично извлекаются из весов для видео значения y_q_scale (резидуалы) и mv_q_scale (motion vector)
-    if not args.force_intra:
-        p_frame_y_q_scales, p_frame_mv_y_q_scales = DMC.get_q_scales_from_ckpt(args.model_path)
-        print("y_q_scales in inter ckpt: ", end='')
-        for q in p_frame_y_q_scales:
-            print(f"{q:.3f}, ", end='')
-        print()
-        print("mv_y_q_scales in inter ckpt: ", end='')
-        for q in p_frame_mv_y_q_scales:
-            print(f"{q:.3f}, ", end='')
-        print()
-        if args.p_frame_y_q_scales is not None:
-            assert len(args.p_frame_y_q_scales) == rate_num
-            assert len(args.p_frame_mv_y_q_scales) == rate_num
-            p_frame_y_q_scales = args.p_frame_y_q_scales
-            p_frame_mv_y_q_scales = args.p_frame_mv_y_q_scales
-            print(f"testing {rate_num} rate points with pre-defined inter q_scales")
-        elif len(p_frame_y_q_scales) == rate_num:
-            print(f"testing {rate_num} rate points with inter q_scales in ckpt")
-        else:
-            max_y_q_scale = p_frame_y_q_scales[0]
-            min_y_q_scale = p_frame_y_q_scales[-1]
-            p_frame_y_q_scales = interpolate_log(min_y_q_scale, max_y_q_scale, rate_num)
+    p_frame_y_q_scales, p_frame_mv_y_q_scales = DMC.get_q_scales_from_ckpt(args.model_path)
+    if args.p_frame_y_q_scales is not None:
+        assert len(args.p_frame_y_q_scales) == rate_num
+        assert len(args.p_frame_mv_y_q_scales) == rate_num
+        p_frame_y_q_scales = args.p_frame_y_q_scales
+        p_frame_mv_y_q_scales = args.p_frame_mv_y_q_scales
+    elif len(p_frame_y_q_scales) == rate_num:
+        pass
+    else:
+        max_y_q_scale = p_frame_y_q_scales[0]
+        min_y_q_scale = p_frame_y_q_scales[-1]
+        p_frame_y_q_scales = interpolate_log(min_y_q_scale, max_y_q_scale, rate_num)
 
-            max_mv_y_q_scale = p_frame_mv_y_q_scales[0]
-            min_mv_y_q_scale = p_frame_mv_y_q_scales[-1]
-            p_frame_mv_y_q_scales = interpolate_log(min_mv_y_q_scale, max_mv_y_q_scale, rate_num)
-        print("y_q_scales for testing: ", end='')
-        for q in p_frame_y_q_scales:
-            print(f"{q:.3f}, ", end='')
-        print()
-        print("mv_y_q_scales for testing: ", end='')
-        for q in p_frame_mv_y_q_scales:
-            print(f"{q:.3f}, ", end='')
-        print()
+        max_mv_y_q_scale = p_frame_mv_y_q_scales[0]
+        min_mv_y_q_scale = p_frame_mv_y_q_scales[-1]
+        p_frame_mv_y_q_scales = interpolate_log(min_mv_y_q_scale, max_mv_y_q_scale, rate_num)
 
-    # Подготовка аргументов для самой нейронки
-    root_path = args.force_root_path if args.force_root_path is not None else config['root_path']
+    # Выбор девайса
+    gpu_num = 0
+    if args.cuda:
+        gpu_num = torch.cuda.device_count()
+
+    if gpu_num > 0:  # TODO: add multiprocessing like in test_video.py
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    # Инициализация FasterRCNN
+    pretrained_weights = torchvision.models.detection.FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1
+    rcnn = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=pretrained_weights)
+    rcnn = rcnn.to(device)
+    rcnn.eval()
+    original_bboxes = []
+
+    # Загрузка весов модели для изображений и её дальнейшая инициализация
+    i_state_dict = get_state_dict(args.i_frame_model_path)
+    i_frame_net = IntraNoAR()
+    i_frame_net.load_state_dict(i_state_dict, strict=False)
+    i_frame_net = i_frame_net.to(device)
+    i_frame_net.eval()
+
+    # Загрузка весов модели для видео и её дальнейшая инициализация
+    p_state_dict = get_state_dict(args.model_path)
+    video_net = DMC()
+    video_net.load_state_dict(p_state_dict, strict=False)
+    video_net = video_net.to(device)
+    video_net.eval()
+
+    # Подготовка аргументов для DCVC-HEM
+    root_path = config['root_path']
     config = config['test_classes']
     for ds_name in config:
         if config[ds_name]['test'] == 0:
             continue
         for seq_name in config[ds_name]['sequences']:
             count_sequences += 1
+            obj_seq = []
             for rate_idx in range(rate_num):
                 cur_args = {}
                 cur_args['rate_idx'] = rate_idx
-                cur_args['i_frame_model_path'] = args.i_frame_model_path
                 cur_args['i_frame_q_scale'] = i_frame_q_scales[rate_idx]
-                if not args.force_intra:
-                    cur_args['model_path'] = args.model_path
-                    cur_args['p_frame_y_q_scale'] = p_frame_y_q_scales[rate_idx]
-                    cur_args['p_frame_mv_y_q_scale'] = p_frame_mv_y_q_scales[rate_idx]
-                cur_args['force_intra'] = args.force_intra
+                cur_args['p_frame_y_q_scale'] = p_frame_y_q_scales[rate_idx]
+                cur_args['p_frame_mv_y_q_scale'] = p_frame_mv_y_q_scales[rate_idx]
                 cur_args['video_path'] = seq_name
                 cur_args['src_type'] = config[ds_name]['src_type']
                 cur_args['src_height'] = config[ds_name]['sequences'][seq_name]['height']
                 cur_args['src_width'] = config[ds_name]['sequences'][seq_name]['width']
                 cur_args['gop'] = config[ds_name]['sequences'][seq_name]['gop']
-                if args.force_intra:
-                    cur_args['gop'] = 1
                 if args.force_intra_period > 0:
                     cur_args['gop'] = args.force_intra_period
                 cur_args['frame_num'] = config[ds_name]['sequences'][seq_name]['frames']
@@ -387,38 +384,58 @@ def main():
 
                 obj = threadpool_executor.submit(
                     worker,
-                    args.cuda,
+                    device,
+                    i_frame_net,
+                    video_net,
                     cur_args)
-                objs.append(obj)
+                obj_seq.append(obj)
+            objs.append(obj_seq)
+
+            print(f'Getting original bound boxes for sequence {seq_name}')
+            sub_dir_name = cur_args['video_path']
+            cur_args['img_path'] = os.path.join(cur_args['dataset_path'], sub_dir_name)
+            bboxes = get_original_bboxes(rcnn, cur_args, 'cuda')
+            original_bboxes.append(bboxes)
 
     results = []
-    for obj in tqdm(objs):
-        result = obj.result()
-        results.append(result)
+    for seq_index in range(len(objs)):
+        print(f'Sequence: {seq_index + 1}')
+        results_seq = []
+        for index, obj in enumerate(objs[seq_index]):
+            print(f'\tIteration: {index + 1}')
+            result = obj.result()
+            results_seq.append(result)
+        results.append(results_seq)
 
-    log_result = {}
-    for ds_name in config:
-        if config[ds_name]['test'] == 0:
-            continue
-        log_result[ds_name] = {}
-        for seq in config[ds_name]['sequences']:
-            log_result[ds_name][seq] = {}
-            for rate in range(rate_num):
-                for res in results:
-                    if res['rate_idx'] == rate and ds_name == res['ds_name'] \
-                            and seq == res['video_path']:
-                        log_result[ds_name][seq][f"{rate:03d}"] = res
+    with torch.no_grad():
+        metric = MeanAveragePrecision()
+        for res_seq_index in range(len(results)):
+            maps = []
+            bpps = []
+            for res_index, result in enumerate(results[res_seq_index]):
+                decoded_bboxes = []
+                target_bboxes = []
+                for index in range(len(result['decoded'])):
+                    if result['frame_type'][index]:
+                        output = forward_rcnn(rcnn, result['decoded'][index])
+                        decoded_bboxes.append(output)
+                        target_bboxes.append(original_bboxes[res_seq_index][index])
 
-    out_json_dir = os.path.dirname(args.output_path)
-    if len(out_json_dir) > 0:
-        create_folder(out_json_dir, True)
-    with open(args.output_path, 'w') as fp:
-        dump_json(log_result, fp, float_digits=6, indent=2)
+                metric.update(decoded_bboxes, target_bboxes)
+                map_metrics = metric.compute()
+                maps.append(map_metrics['map_50'].item())
+                bpps.append(result['ave_p_frame_bpp'])
 
-    total_minutes = (time.time() - begin_time) / 60
+            x = np.array(bpps)
+            y = np.array(maps)
+            plt.plot(x, y, 'o-', label='Original DCVC-HEM')
+            plt.legend()
+            plt.title('Object detection performance')
+            plt.xlabel('bpp')
+            plt.ylabel('mAP@0.5 (%)')
+            plt.show()
+
     print('Test finished')
-    print(f'Tested {count_frames} frames from {count_sequences} sequences')
-    print(f'Total elapsed time: {total_minutes:.1f} min')
 
 
 if __name__ == "__main__":

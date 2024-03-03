@@ -61,7 +61,7 @@ def dump_json(obj, fid, float_digits=-1, **kwargs):
 
 
 def generate_log_json(frame_num, frame_types, bits, psnrs, ssims,
-                      frame_pixel_num, test_time):
+                      frame_pixel_num, test_time, decoded=None):
     cur_ave_i_frame_bit = 0
     cur_ave_i_frame_psnr = 0
     cur_ave_i_frame_msssim = 0
@@ -108,5 +108,6 @@ def generate_log_json(frame_num, frame_types, bits, psnrs, ssims,
     log_result['ave_all_frame_psnr'] = (cur_ave_i_frame_psnr + cur_ave_p_frame_psnr) / frame_num
     log_result['ave_all_frame_msssim'] = (cur_ave_i_frame_msssim + cur_ave_p_frame_msssim) / \
         frame_num
+    log_result['decoded'] = decoded
 
     return log_result

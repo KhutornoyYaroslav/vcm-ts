@@ -1,12 +1,12 @@
 {
-    "root_path": "/home/alexnevskiy/PycharmProjects/vcm-ts/DCVC-HEM/media/data",
+    "root_path": "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs",
     "test_classes": {
         "HUAWEI": {
             "test": 1,
-            "base_path": "huawei",
+            "base_path": "validation",
             "src_type": "png",
             "sequences": {
-                "video_images": {"width": 1920, "height": 1080, "frames": 100, "gop": 32}
+                "test_frames": {"width": 1920, "height": 1080, "frames": 100, "gop": 32}
             }
         }
     }
