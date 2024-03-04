@@ -132,7 +132,7 @@ class DCVC_HEM(nn.Module):
             'rate': [],  # (N, (T - p_frames) * p_frames)
             'dist': [],  # (N, (T - p_frames) * p_frames)
             'loss': [],  # (N, (T - p_frames) * p_frames)
-            'perceptual_loss': [],  # (1, (T - p_frames) * p_frames)
+            'perceptual_loss': [],  # (N, (T - p_frames) * p_frames)
             'loss_seq': [],  # (N, T - p_frames)
             'input_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
             'decod_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
@@ -175,15 +175,16 @@ class DCVC_HEM(nn.Module):
                 assert loss_dist_key in output
                 dist = output[loss_dist_key]
 
-                loss = rate + dist * lambdas
-                loss_to_opt = torch.mean(loss)  # (N) -> (1)
-                perceptual_loss = torch.tensor(0.0, device=loss_to_opt.device)
                 if perceptual_loss_key == 'vgg':
-                    perceptual_loss = output['vgg_loss']
+                    perceptual_dist = output['vgg_loss']
                 elif perceptual_loss_key == 'rcnn':
-                    perceptual_loss = output['rcnn_loss']
-                loss_to_opt += perceptual_loss * self.pl_lambda
+                    perceptual_dist = output['rcnn_loss']
+                else:
+                    perceptual_dist = torch.tensor(0.0, device=loss_to_opt.device)
 
+                loss = rate + dist * lambdas + perceptual_dist * self.pl_lambda
+                loss_to_opt = torch.mean(loss)  # (N) -> (1)
+                
                 loss_list.append(rate + dist * lambdas)
 
                 if is_train:
@@ -196,7 +197,7 @@ class DCVC_HEM(nn.Module):
                 result['rate'].append(rate)  # (N)
                 result['dist'].append(dist)  # (N)
                 result['loss'].append(loss)  # (N)
-                result['perceptual_loss'].append(perceptual_loss)  # (1)
+                result['perceptual_loss'].append(perceptual_dist)  # (N)
                 result['single_forwards'] += 1
                 input_seqs.append(input[:, t_i + 1 + p_idx])
                 decod_seqs.append(dpb["ref_frame"])
@@ -211,12 +212,14 @@ class DCVC_HEM(nn.Module):
         result['rate'] = torch.stack(result['rate'], -1)  # (N, (T - p_frames) * p_frames)
         result['dist'] = torch.stack(result['dist'], -1)  # (N, (T - p_frames) * p_frames)
         result['loss'] = torch.stack(result['loss'], -1)  # (N, (T - p_frames) * p_frames)
-        result['perceptual_loss'] = torch.stack(result['perceptual_loss'], -1)  # (1, (T - p_frames) * p_frames)
+        result['perceptual_loss'] = torch.stack(result['perceptual_loss'], -1)  # (N, (T - p_frames) * p_frames)
         result['loss_seq'] = torch.stack(result['loss_seq'], -1)  # (N, T - p_frames)
         result['input_seqs'] = torch.stack(result['input_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
         result['input_seqs'] = result['input_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
         result['decod_seqs'] = torch.stack(result['decod_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
         result['decod_seqs'] = result['decod_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+
+        print(result['perceptual_loss'].shape)
 
         return result
 

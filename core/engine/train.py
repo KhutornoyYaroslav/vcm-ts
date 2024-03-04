@@ -231,8 +231,8 @@ def do_train(cfg,
             total_iterations += outputs['single_forwards']
 
             # Update stats
-            stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (T-1) -> (1)
-            stats['perceptual_loss'] += torch.mean(outputs['perceptual_loss'], -1).item()  # (T-1) -> (1)
+            stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (N, T-1) -> (1)
+            stats['perceptual_loss'] += torch.sum(torch.mean(outputs['perceptual_loss'], -1)).item()  # (N, T-1) -> (1)
             stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
             stats['mse_sum'] += 0  # TODO:
             stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)

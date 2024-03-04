@@ -20,7 +20,7 @@ class VGGPerceptualLoss(torch.nn.Module):
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
-    def forward(self, input, target, feature_layers=[0, 1, 2, 3], style_layers=[]):
+    def forward(self, input, target, feature_layers=[0, 1, 2, 3]):
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)
@@ -37,14 +37,9 @@ class VGGPerceptualLoss(torch.nn.Module):
             x = block(x)
             y = block(y)
             if i in feature_layers:
-                loss += torch.nn.functional.l1_loss(x, y)
-            if i in style_layers:
-                act_x = x.reshape(x.shape[0], x.shape[1], -1)
-                act_y = y.reshape(y.shape[0], y.shape[1], -1)
-                gram_x = act_x @ act_x.permute(0, 2, 1)
-                gram_y = act_y @ act_y.permute(0, 2, 1)
-                loss += torch.nn.functional.l1_loss(gram_x, gram_y)
-        return loss
+                loss_ = torch.nn.functional.l1_loss(x, y, reduction='none')
+                loss += torch.mean(loss_, dim=(1, 2, 3))
+        return loss # (N)
 
 
 class FasterRCNNPerceptualLoss(torch.nn.Module):
@@ -73,6 +68,7 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
             f_target = self.features.forward(target)
 
         # Calculate loss
+        # TODO: reduce mean only by (1, 2, 3) dimensions
         loss = 0.0
         for key in f_input.keys():
             if key in feature_layers:
