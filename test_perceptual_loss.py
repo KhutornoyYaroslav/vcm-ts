@@ -6,6 +6,7 @@ import os
 import concurrent.futures
 import json
 import multiprocessing
+import shutil
 import time
 
 import torch
@@ -22,6 +23,8 @@ from DCVC_HEM.src.utils.png_reader import PNGReader
 from tqdm import tqdm
 from pytorch_msssim import ms_ssim
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from subprocess import call
+import cv2
 
 
 def parse_args():
@@ -438,5 +441,94 @@ def main():
     print('Test finished')
 
 
+def get_video_bpp(path, countable=True):
+    cap = cv2.VideoCapture(path)
+    original_video_size = os.path.getsize(path) * 8
+    w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+
+    if countable:
+        count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    else:
+        count = 0
+        while cap.isOpened():
+            ret, x = cap.read()
+            if not ret:
+                break
+            count += 1
+
+    return original_video_size / count / w / h
+
+
+def video_to_frames(video_path: str, out_dir: str, gop: int):
+    os.makedirs(out_dir, exist_ok=True)
+
+    bpp = get_video_bpp(video_path, countable=False)
+    frames_dir = os.path.join(out_dir, 'test_0_short', str(bpp) + "_" + str(gop))  # TODO: video_name
+    shutil.rmtree(frames_dir, ignore_errors=True)
+    os.makedirs(frames_dir, exist_ok=True)
+
+    cap = cv2.VideoCapture(video_path)
+    frames_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    pbar = tqdm(total=int(frames_count))
+    i = 1
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        image_filename = os.path.join(frames_dir, 'im' + str(i).zfill(5) + '.png')
+        cv2.imwrite(image_filename, frame)
+        i += 1
+        pbar.update(1)
+    pbar.close()
+    cap.release()
+
+
+def encode_folder(src_files, out_path, framerate: int, crf: int = 0, preset: str = 'ultrafast'):
+    call([
+        'ffmpeg',
+        '-hide_banner',
+        '-framerate', str(framerate),
+        '-loglevel', 'error',
+        '-i', src_files,
+        '-c:v', 'libx265',
+        '-x265-params', 'crf=' + str(crf),
+        '-preset', preset,
+        '-f', 'hevc',
+        '-y',
+        out_path
+    ])
+
+    return out_path
+
+
+def encode_crfs(crfs, temp_dir, frames_dir, out_dir, fps, gop):
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    shutil.rmtree(out_dir, ignore_errors=True)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    for crf in crfs:
+        out_filename_crf_custom = os.path.join(temp_dir, "crf_" + str(crf) + ".mp4")
+        encode_folder(frames_dir, out_filename_crf_custom, framerate=fps, crf=crf)
+        video_to_frames(out_filename_crf_custom, out_dir, gop)
+
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def save_ffmpeg(args, crf_start: int, crf_end: int, fps: int, gop: int):
+    crfs = np.linspace(crf_start, crf_end, num=args.rate_num, dtype=np.int32).tolist()
+    temp_dir = 'outputs/temp'
+    frames_dir = '/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/dataset/test_0_short/images'
+    frames_dir = os.path.join(frames_dir, "im%05d.png")
+    out_dir = 'outputs/hevc'
+    encode_crfs(crfs, temp_dir, frames_dir, out_dir, fps, gop)
+
+
 if __name__ == "__main__":
-    main()
+    # main()
+    args = parse_args()
+    crf_start = 28
+    crf_end = 41
+    fps = 25
+    gop = 32
+    save_ffmpeg(args, crf_start, crf_end, fps, gop)
