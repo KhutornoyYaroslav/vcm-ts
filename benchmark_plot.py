@@ -6,9 +6,9 @@ import numpy as np
 import torch
 import torchvision
 from pytorch_msssim import MS_SSIM
-from torch import nn
 from torchmetrics.detection import MeanAveragePrecision
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 from DCVC_HEM.src.utils.png_reader import PNGReader
 
@@ -19,9 +19,33 @@ def np_image_to_tensor(img):
     return image
 
 
+def get_psnr(input1, input2):
+    mse = torch.mean((input1 - input2) ** 2)
+    psnr = 20 * torch.log10(1 / torch.sqrt(mse))
+    return psnr.item()
+
+
+def delete_unsupported_annotations(annotations, classes):
+    for annotation in annotations:
+        mask = torch.ones(annotation['labels'].shape[0], dtype=torch.bool)
+        for i in range(annotation['labels'].shape[0]):
+            mask[i] = annotation['labels'][i].item() in classes
+        annotation['boxes'] = annotation['boxes'][mask]
+        annotation['labels'] = annotation['labels'][mask]
+        annotation['scores'] = annotation['scores'][mask]
+
+
 def read_dataset(dataset_dir: str,
                  device: str):
     dataset = {}
+    metadata = os.path.join(dataset_dir, "metadata.txt")
+    classes = []
+    with open(metadata) as f:
+        for line in f.readlines():
+            elements = line.split(': ')
+            classes.append(int(elements[0]))
+    dataset['classes'] = classes
+
     seq_folders = [f for f in os.scandir(dataset_dir) if f.is_dir()]
     for seq_folder in seq_folders:
         print(f'Sequence: {seq_folder.name}')
@@ -69,36 +93,27 @@ def forward_rcnn(rcnn, x):
 def calculate_metrics(dataset,
                       images,
                       annotations,
-                      video_name: str,
-                      bpp: float,
-                      gop: int):
+                      video_name: str):
     metric_map = MeanAveragePrecision()
-    metric_mse = nn.MSELoss(reduction='none')
     metric_ssim = MS_SSIM(data_range=1.0, size_average=False)
 
-    dataset_images = [image for i, image in enumerate(dataset[video_name]['images']) if i % gop != 0]
-    dataset_annotations = [anno for i, anno in enumerate(dataset[video_name]['annotations']) if i % gop != 0]
+    dataset_images = dataset[video_name]['images']
+    dataset_annotations = dataset[video_name]['annotations']
     metric_map.update(annotations, dataset_annotations)
     map_metrics = metric_map.compute()
     mean_ap = map_metrics['map_50'].item()
 
-    mse_list = []
+    psnr_list = []
     ssim_list = []
-    for dataset_image, image in zip(dataset_images, images):
-        _, _, H, W = image.size()
-        pixel_num = H * W
-        mse = metric_mse(dataset_image, image)
+    for dataset_image, image in tqdm(zip(dataset_images, images), total=len(dataset_images)):
+        psnr = get_psnr(image, dataset_image)
         ssim = metric_ssim(dataset_image, image)
-        mse = torch.sum(mse, dim=(1, 2, 3)) / pixel_num
-        mse = torch.squeeze(mse)
-        mse_list.append(mse)
+        psnr_list.append(psnr)
         ssim_list.append(ssim)
 
-    mse = torch.stack(mse_list, -1)
-    mse = torch.mean(mse, -1)
-    psnr = 10 * np.log10(1.0 / mse)
+    psnr = np.mean(np.array(psnr_list))
     ssim = torch.stack(ssim_list, -1)
-    ssim = torch.mean(ssim, -1)
+    ssim = torch.mean(ssim, -1).item()
     return mean_ap, psnr, ssim
 
 
@@ -107,7 +122,6 @@ def get_metrics(decod_dir: str,
                 dataset,
                 device: str):
     metrics = {}
-    metric = MeanAveragePrecision()
     model_folders = [f for f in os.scandir(decod_dir) if f.is_dir()]
 
     for model_folder in model_folders:
@@ -119,33 +133,89 @@ def get_metrics(decod_dir: str,
             print(f'\tCalculate metrics for video {video_folder.name}')
             metrics[model_folder.name][video_folder.name] = []
             images_folders = [f for f in os.scandir(video_folder) if f.is_dir()]
+            images_folders.sort(key=lambda folder: folder.name)
 
             for images_folder in images_folders:
                 seq_info = images_folder.name.split('_')
                 bpp = float(seq_info[0])
                 gop = int(seq_info[1])
-                print(f'\tCalculate metrics for sequence with bpp = {bpp} and gop = {gop}')
+                print(f'\t\tCalculate metrics for sequence with bpp = {bpp} and gop = {gop}')
                 images = []
                 annotations = []
                 source_images = sorted(glob(os.path.join(images_folder, "*.png")))
 
-                for index in tqdm(range(len(source_images))):
-                    if index % gop != 0:
-                        src_reader = PNGReader(images_folder.path)
-                        rgb = src_reader.read_one_frame(src_format="rgb")
-                        image = np_image_to_tensor(rgb)
-                        image = image.to(device)
+                print(f'\t\tObjects detection')
+                src_reader = PNGReader(images_folder.path)
+                for _ in tqdm(range(len(source_images))):
+                    rgb = src_reader.read_one_frame(src_format="rgb")
+                    image = np_image_to_tensor(rgb)
+                    image = image.to(device)
 
-                        output = forward_rcnn(rcnn, image)
-                        image = image.cpu()
-                        torch.cuda.empty_cache()
-                        images.append(image)
-                        annotations.append(output)
+                    output = forward_rcnn(rcnn, image)
+                    image = image.cpu()
+                    torch.cuda.empty_cache()
+                    images.append(image)
+                    annotations.append(output)
 
-                calculate_metrics(dataset, images, annotations, video_folder.name, bpp, gop)
-                metrics[model_folder.name][video_folder.name].append(predictions_seq)
+                delete_unsupported_annotations(annotations, dataset['classes'])
+
+                print(f'\t\tCalculate metrics')
+                mean_ap, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name)
+                metrics_info = dict(
+                    mean_ap=mean_ap,
+                    psnr=psnr,
+                    ssim=ssim,
+                    bpp=bpp,
+                    gop=gop
+                )
+                metrics[model_folder.name][video_folder.name].append(metrics_info)
 
     return metrics
+
+
+def plot_graphs(metrics, out_path: str):
+    models = list(metrics.keys())
+    videos = list(metrics[models[0]].keys())
+
+    for video in videos:
+        for model in models:
+            bpps = [info['bpp'] for info in metrics[model][video]]
+            maps = [info['mean_ap'] for info in metrics[model][video]]
+            x = np.array(bpps)
+            y = np.array(maps)
+            plt.plot(x, y, 'o-', label=model)
+        plt.legend()
+        plt.title(f'Object detection performance for {video}')
+        plt.xlabel('bpp')
+        plt.ylabel('mAP@0.5 (%)')
+        plt.savefig(os.path.join(out_path, f"detection_{video}.png"))
+        plt.show()
+
+        for model in models:
+            bpps = [info['bpp'] for info in metrics[model][video]]
+            psnrs = [info['psnr'] for info in metrics[model][video]]
+            x = np.array(bpps)
+            y = np.array(psnrs)
+            plt.plot(x, y, 'o-', label=model)
+        plt.legend()
+        plt.title(f'Rate and distortion curves (PSNR) for {video}')
+        plt.xlabel('bpp')
+        plt.ylabel('PSNR (db)')
+        plt.savefig(os.path.join(out_path, f"psnr_{video}.png"))
+        plt.show()
+
+        for model in models:
+            bpps = [info['bpp'] for info in metrics[model][video]]
+            ssims = [info['ssim'] for info in metrics[model][video]]
+            x = np.array(bpps)
+            y = np.array(ssims)
+            plt.plot(x, y, 'o-', label=model)
+        plt.legend()
+        plt.title(f'Rate and distortion curves (MS_SSIM) for {video}')
+        plt.xlabel('bpp')
+        plt.ylabel('MS-SSIM')
+        plt.savefig(os.path.join(out_path, f"ms-ssim_{video}.png"))
+        plt.show()
 
 
 def main():
@@ -172,7 +242,9 @@ def main():
     rcnn = rcnn.to(args.device)
     rcnn.eval()
 
-    get_metrics(args.decod_dir, rcnn, dataset, args.device)
+    metrics = get_metrics(args.decod_dir, rcnn, dataset, args.device)
+
+    plot_graphs(metrics, args.out_path)
 
 
 if __name__ == "__main__":
