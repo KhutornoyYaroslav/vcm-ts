@@ -86,7 +86,8 @@ def run_test(video_net, i_frame_net, args, device):
 
     # Инициализация читателя изображений
     if args['src_type'] == 'png':
-        src_reader = PNGReader(args['img_path'], args['src_width'], args['src_height'])
+        # src_reader = PNGReader(args['img_path'], args['src_width'], args['src_height'])
+        src_reader = PNGReader(args['img_path'])
 
     frame_types = []
     psnrs = []
