@@ -176,6 +176,7 @@ def get_metrics(decod_dir: str,
 def plot_graphs(metrics, out_path: str):
     models = list(metrics.keys())
     videos = list(metrics[models[0]].keys())
+    os.makedirs(out_path, exist_ok=True)
 
     for video in videos:
         for model in models:
@@ -221,16 +222,16 @@ def plot_graphs(metrics, out_path: str):
 def main():
     parser = argparse.ArgumentParser(description='Benchmark graph plotting')
     parser.add_argument('--dataset-dir', dest='dataset_dir', type=str,
-                        default="/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/dataset",
+                        default="data/huawei/outputs/benchmark/dataset",
                         help="Path to dataset directory")
     parser.add_argument('--decod-dir', dest='decod_dir', type=str,
-                        default="/home/alexnevskiy/PycharmProjects/vcm-ts-copy/outputs",
+                        default="data/huawei/outputs/decod",
                         help="Path to results directory of decoding stage")
     parser.add_argument('--device', dest='device', type=str,
                         default="cuda",
                         help="Device for tensors")
     parser.add_argument('--out-path', dest='out_path', type=str,
-                        default="/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark",
+                        default="outputs/benchmark",
                         help="Path to output dir with graphs")
     args = parser.parse_args()
 

@@ -515,20 +515,21 @@ def encode_crfs(crfs, temp_dir, frames_dir, out_dir, fps, gop):
     shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def save_ffmpeg(args, crf_start: int, crf_end: int, fps: int, gop: int):
-    crfs = np.linspace(crf_start, crf_end, num=args.rate_num, dtype=np.int32).tolist()
-    temp_dir = 'outputs/temp'
-    frames_dir = '/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/dataset/test_0_short/images'
+def save_ffmpeg(rate_num, crf_start: int, crf_end: int, fps: int, gop: int):
+    crfs = np.linspace(crf_start, crf_end, num=rate_num, dtype=np.int32).tolist()
+    temp_dir = 'data/huawei/outputs/temp'
+    frames_dir = 'data/huawei/outputs/benchmark/dataset/test_0_short/images'
     frames_dir = os.path.join(frames_dir, "im%05d.png")
-    out_dir = 'outputs/hevc'
+    out_dir = 'data/huawei/outputs/decod/hevc'
     encode_crfs(crfs, temp_dir, frames_dir, out_dir, fps, gop)
 
 
 if __name__ == "__main__":
     # main()
     args = parse_args()
+    rate_num = 10
     crf_start = 28
-    crf_end = 41
+    crf_end = 48
     fps = 25
     gop = 32
-    save_ffmpeg(args, crf_start, crf_end, fps, gop)
+    save_ffmpeg(rate_num, crf_start, crf_end, fps, gop)
