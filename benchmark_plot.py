@@ -174,8 +174,8 @@ def get_metrics(decod_dir: str,
 
 
 def plot_graphs(metrics, out_path: str):
-    models = list(metrics.keys())
-    videos = list(metrics[models[0]].keys())
+    models = sorted(list(metrics.keys()))
+    videos = sorted(list(metrics[models[0]].keys()))
     os.makedirs(out_path, exist_ok=True)
 
     for video in videos:

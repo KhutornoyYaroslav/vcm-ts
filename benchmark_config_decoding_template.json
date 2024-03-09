@@ -1,0 +1,23 @@
+{
+    "dataset_dir": "data/huawei/outputs/benchmark/dataset",
+    "gop": 32,
+    "rate_count": 2,
+    "out_dir": "data/huawei/outputs/decod",
+    "models": {
+        "DCVC-HEM": {
+            "image_model_weights": "pretrained/acmmm2022_image_psnr.pth",
+            "video_model_weights": "pretrained/acmmm2022_video_psnr.pth",
+            "device": "cuda"
+        },
+        "DCVC-HEM ours": {
+            "image_model_weights": "pretrained/acmmm2022_image_psnr.pth",
+            "video_model_weights": "pretrained/ours_video_psnr.pth",
+            "device": "cuda"
+        },
+        "HEVC": {
+            "crf_start": 28,
+            "crf_end": 48,
+            "fps": 25
+        }
+    }
+}
