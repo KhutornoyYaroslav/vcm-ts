@@ -1,0 +1,13 @@
+{
+    "dataset_dir": "data/huawei/outputs/benchmark/dataset",
+    "gop": 32,
+    "rate_count": 6,
+    "out_dir": "data/huawei/outputs/decod",
+    "models": {
+        "HEVC": {
+            "crf_start": 24,
+            "crf_end": 44,
+            "fps": 25
+        }
+    }
+}
