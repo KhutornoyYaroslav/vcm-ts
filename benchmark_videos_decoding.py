@@ -127,7 +127,15 @@ def decod_dcvc(dataset_dir: str,
 
     # Задаётся количество используемых при тестировании значений q_scale (min = 2, max = 64)
     i_frame_q_scales = IntraNoAR.get_q_scales_from_ckpt(config['image_model_weights'])
-    if len(i_frame_q_scales) == rate_count:
+    if config['i_frame_q_scales']:
+        if config['interpolate_q_scales']:
+            max_q_scale = config['i_frame_q_scales'][0]
+            min_q_scale = config['i_frame_q_scales'][-1]
+            i_frame_q_scales = interpolate_log(min_q_scale, max_q_scale, rate_count)
+        else:
+            assert len(config['i_frame_q_scales']) == rate_count
+            i_frame_q_scales = config['i_frame_q_scales']
+    elif len(i_frame_q_scales) == rate_count:
         pass
     else:
         max_q_scale = i_frame_q_scales[0]
@@ -136,7 +144,21 @@ def decod_dcvc(dataset_dir: str,
 
     # Аналогично извлекаются из весов для видео значения y_q_scale (резидуалы) и mv_q_scale (motion vector)
     p_frame_y_q_scales, p_frame_mv_y_q_scales = DMC.get_q_scales_from_ckpt(config['video_model_weights'])
-    if len(p_frame_y_q_scales) == rate_count:
+    if config['p_frame_y_q_scales']:
+        if config['interpolate_q_scales']:
+            max_y_q_scale = config['p_frame_y_q_scales'][0]
+            min_y_q_scale = config['p_frame_y_q_scales'][-1]
+            p_frame_y_q_scales = interpolate_log(min_y_q_scale, max_y_q_scale, rate_count)
+
+            max_mv_y_q_scale = config['p_frame_mv_q_scales'][0]
+            min_mv_y_q_scale = config['p_frame_mv_q_scales'][-1]
+            p_frame_mv_y_q_scales = interpolate_log(min_mv_y_q_scale, max_mv_y_q_scale, rate_count)
+        else:
+            assert len(config['p_frame_y_q_scales']) == rate_count
+            assert len(config['p_frame_mv_q_scales']) == rate_count
+            p_frame_y_q_scales = config['p_frame_y_q_scales']
+            p_frame_mv_y_q_scales = config['p_frame_mv_q_scales']
+    elif len(p_frame_y_q_scales) == rate_count:
         pass
     else:
         max_y_q_scale = p_frame_y_q_scales[0]
