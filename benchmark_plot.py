@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 from glob import glob
 
@@ -23,6 +24,17 @@ def get_psnr(input1, input2):
     mse = torch.mean((input1 - input2) ** 2)
     psnr = 20 * torch.log10(1 / torch.sqrt(mse))
     return psnr.item()
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    if v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+
+    raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 def delete_unsupported_annotations(annotations, classes):
@@ -93,7 +105,8 @@ def forward_rcnn(rcnn, x):
 def calculate_metrics(dataset,
                       images,
                       annotations,
-                      video_name: str):
+                      video_name: str,
+                      use_ms_ssim: bool):
     metric_map = MeanAveragePrecision()
     metric_ssim = MS_SSIM(data_range=1.0, size_average=False)
 
@@ -107,20 +120,25 @@ def calculate_metrics(dataset,
     ssim_list = []
     for dataset_image, image in tqdm(zip(dataset_images, images), total=len(dataset_images)):
         psnr = get_psnr(image, dataset_image)
-        ssim = metric_ssim(dataset_image, image)
+        if use_ms_ssim:
+            ssim = metric_ssim(dataset_image, image)
+            ssim_list.append(ssim)
         psnr_list.append(psnr)
-        ssim_list.append(ssim)
 
     psnr = np.mean(np.array(psnr_list))
-    ssim = torch.stack(ssim_list, -1)
-    ssim = torch.mean(ssim, -1).item()
+    if use_ms_ssim:
+        ssim = torch.stack(ssim_list, -1)
+        ssim = torch.mean(ssim, -1).item()
+    else:
+        ssim = None
     return mean_ap, psnr, ssim
 
 
 def get_metrics(decod_dir: str,
                 rcnn,
                 dataset,
-                device: str):
+                device: str,
+                use_ms_ssim: bool):
     metrics = {}
     model_folders = [f for f in os.scandir(decod_dir) if f.is_dir()]
 
@@ -136,9 +154,14 @@ def get_metrics(decod_dir: str,
             images_folders.sort(key=lambda folder: folder.name)
 
             for images_folder in images_folders:
-                seq_info = images_folder.name.split('_')
-                bpp = float(seq_info[0])
-                gop = int(seq_info[1])
+                info_json = images_folder.path + '.json'
+                with open(info_json) as f:
+                    seq_info = json.load(f)
+                bpp = seq_info['avg_bpp']
+                gop = seq_info['gop']
+                frame_bpp = []
+                if 'frame_bpp' in seq_info.keys():
+                    frame_bpp = seq_info['frame_bpp']
                 print(f'\t\tCalculate metrics for sequence with bpp = {bpp} and gop = {gop}')
                 images = []
                 annotations = []
@@ -160,63 +183,93 @@ def get_metrics(decod_dir: str,
                 delete_unsupported_annotations(annotations, dataset['classes'])
 
                 print(f'\t\tCalculate metrics')
-                mean_ap, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name)
+                mean_ap, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name, use_ms_ssim)
                 metrics_info = dict(
                     mean_ap=mean_ap,
                     psnr=psnr,
                     ssim=ssim,
                     bpp=bpp,
-                    gop=gop
+                    frame_bpp=frame_bpp,
+                    gop=gop,
+                    quality=images_folder.name
                 )
                 metrics[model_folder.name][video_folder.name].append(metrics_info)
 
     return metrics
 
 
-def plot_graphs(metrics, out_path: str):
-    models = sorted(list(metrics.keys()))
-    videos = sorted(list(metrics[models[0]].keys()))
+def plot_graphs(metrics, out_path: str, use_ms_ssim: bool):
+    codecs = sorted(list(metrics.keys()))
+    videos = sorted(list(metrics[codecs[0]].keys()))
     os.makedirs(out_path, exist_ok=True)
 
     for video in videos:
-        for model in models:
-            bpps = [info['bpp'] for info in metrics[model][video]]
-            maps = [info['mean_ap'] for info in metrics[model][video]]
+        for codec in codecs:
+            bpps = [info['bpp'] for info in metrics[codec][video]]
+            maps = [info['mean_ap'] for info in metrics[codec][video]]
             x = np.array(bpps)
             y = np.array(maps)
-            plt.plot(x, y, 'o-', label=model)
+            plt.plot(x, y, 'o-', label=codec)
         plt.legend()
+        plt.grid()
         plt.title(f'Object detection performance for {video}')
         plt.xlabel('bpp')
         plt.ylabel('mAP@0.5 (%)')
         plt.savefig(os.path.join(out_path, f"detection_{video}.png"))
         plt.show()
 
-        for model in models:
-            bpps = [info['bpp'] for info in metrics[model][video]]
-            psnrs = [info['psnr'] for info in metrics[model][video]]
+        for codec in codecs:
+            bpps = [info['bpp'] for info in metrics[codec][video]]
+            psnrs = [info['psnr'] for info in metrics[codec][video]]
             x = np.array(bpps)
             y = np.array(psnrs)
-            plt.plot(x, y, 'o-', label=model)
+            plt.plot(x, y, 'o-', label=codec)
         plt.legend()
+        plt.grid()
         plt.title(f'Rate and distortion curves (PSNR) for {video}')
         plt.xlabel('bpp')
         plt.ylabel('PSNR (db)')
         plt.savefig(os.path.join(out_path, f"psnr_{video}.png"))
         plt.show()
 
-        for model in models:
-            bpps = [info['bpp'] for info in metrics[model][video]]
-            ssims = [info['ssim'] for info in metrics[model][video]]
-            x = np.array(bpps)
-            y = np.array(ssims)
-            plt.plot(x, y, 'o-', label=model)
-        plt.legend()
-        plt.title(f'Rate and distortion curves (MS_SSIM) for {video}')
-        plt.xlabel('bpp')
-        plt.ylabel('MS-SSIM')
-        plt.savefig(os.path.join(out_path, f"ms-ssim_{video}.png"))
-        plt.show()
+        if use_ms_ssim:
+            for codec in codecs:
+                bpps = [info['bpp'] for info in metrics[codec][video]]
+                ssims = [info['ssim'] for info in metrics[codec][video]]
+                x = np.array(bpps)
+                y = np.array(ssims)
+                plt.plot(x, y, 'o-', label=codec)
+            plt.legend()
+            plt.grid()
+            plt.title(f'Rate and distortion curves (MS_SSIM) for {video}')
+            plt.xlabel('bpp')
+            plt.ylabel('MS-SSIM')
+            plt.savefig(os.path.join(out_path, f"ms-ssim_{video}.png"))
+            plt.show()
+
+        for codec in codecs:
+            plot_flag = True
+            plt.figure(figsize=(16, 9))
+            for quality in metrics[codec][video]:
+                if quality['frame_bpp']:
+                    bpps = quality['frame_bpp']
+                    frames_count = range(len(bpps))
+                    x = np.array(frames_count)
+                    y = np.array(bpps)
+                    plt.plot(x, y, 'o-', label=quality['quality'])
+                else:
+                    plot_flag = False
+                    break
+
+            if plot_flag:
+                plt.yscale('log')
+                plt.legend()
+                plt.grid()
+                plt.title(f'Bpp per frame for codec {codec} and video {video}')
+                plt.xlabel('frame')
+                plt.ylabel('bpp')
+                plt.savefig(os.path.join(out_path, f"bpp_{codec}_{video}.png"))
+                plt.show()
 
 
 def main():
@@ -233,6 +286,9 @@ def main():
     parser.add_argument('--out-path', dest='out_path', type=str,
                         default="outputs/benchmark",
                         help="Path to output dir with graphs")
+    parser.add_argument('--ms-ssim', dest='ms_ssim', type=str2bool,
+                        default=False,
+                        help="Plot graphs with MS-SSIM")
     args = parser.parse_args()
 
     print('Reading dataset')
@@ -243,9 +299,9 @@ def main():
     rcnn = rcnn.to(args.device)
     rcnn.eval()
 
-    metrics = get_metrics(args.decod_dir, rcnn, dataset, args.device)
+    metrics = get_metrics(args.decod_dir, rcnn, dataset, args.device, args.ms_ssim)
 
-    plot_graphs(metrics, args.out_path)
+    plot_graphs(metrics, args.out_path, args.ms_ssim)
 
 
 if __name__ == "__main__":
