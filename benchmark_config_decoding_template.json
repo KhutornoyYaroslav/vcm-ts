@@ -7,11 +7,19 @@
         "DCVC-HEM": {
             "image_model_weights": "pretrained/acmmm2022_image_psnr.pth",
             "video_model_weights": "pretrained/acmmm2022_video_psnr.pth",
+            "i_frame_q_scales": [2.0, 0.5],
+            "p_frame_y_q_scales": [1.75, 0.5319],
+            "p_frame_mv_q_scales": [1.4, 0.9189],
+            "interpolate_q_scales": true,
             "device": "cuda"
         },
         "DCVC-HEM ours": {
             "image_model_weights": "pretrained/acmmm2022_image_psnr.pth",
             "video_model_weights": "pretrained/ours_video_psnr.pth",
+            "i_frame_q_scales": [2.0, 0.5],
+            "p_frame_y_q_scales": [9.0, 2.3924],
+            "p_frame_mv_q_scales": [6.0, 3.3470],
+            "interpolate_q_scales": true,
             "device": "cuda"
         },
         "HEVC": {
