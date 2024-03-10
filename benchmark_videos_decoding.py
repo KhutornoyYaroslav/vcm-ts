@@ -36,11 +36,43 @@ def save_torch_image(img, save_path):
     Image.fromarray(img).save(save_path)
 
 
+def generate_log_json(frame_num, gop, frame_types, bits, frame_pixel_num):
+    cur_ave_i_frame_bit = 0
+    cur_ave_p_frame_bit = 0
+    cur_i_frame_num = 0
+    cur_p_frame_num = 0
+    for idx in range(frame_num):
+        if frame_types[idx] == 0:
+            cur_ave_i_frame_bit += bits[idx]
+            cur_i_frame_num += 1
+        else:
+            cur_ave_p_frame_bit += bits[idx]
+            cur_p_frame_num += 1
+
+    log_result = {}
+    log_result['gop'] = gop
+    log_result['i_frame_num'] = cur_i_frame_num
+    log_result['p_frame_num'] = cur_p_frame_num
+    log_result['avg_i_frame_bpp'] = cur_ave_i_frame_bit / cur_i_frame_num / frame_pixel_num
+    if cur_p_frame_num > 0:
+        total_p_pixel_num = cur_p_frame_num * frame_pixel_num
+        log_result['avg_p_frame_bpp'] = cur_ave_p_frame_bit / total_p_pixel_num
+    else:
+        log_result['avg_p_frame_bpp'] = 0
+    log_result['avg_bpp'] = (cur_ave_i_frame_bit + cur_ave_p_frame_bit) / \
+        (frame_num * frame_pixel_num)
+    log_result['frame_bpp'] = list(np.array(bits) / frame_pixel_num)
+    log_result['frame_type'] = frame_types
+
+    return log_result
+
+
 def run_test(video_net, i_frame_net, args, device):
     frame_num = args['frame_num']
     gop = args['gop']
     src_reader = PNGReader(args['img_path'])
 
+    frame_types = []
     bits = []
     frame_pixel_num = 0
 
@@ -80,6 +112,7 @@ def run_test(video_net, i_frame_net, args, device):
                     "ref_mv_y": None,
                 }
                 recon_frame = result["x_hat"]
+                frame_types.append(0)
                 bits.append(result["bit"])
             else:
                 result = video_net.encode_decode(x_padded, dpb,
@@ -88,6 +121,7 @@ def run_test(video_net, i_frame_net, args, device):
                                                  y_q_scale=args['p_frame_y_q_scale'])
                 dpb = result["dpb"]
                 recon_frame = dpb["ref_frame"]
+                frame_types.append(1)
                 bits.append(result['bit'])
 
             recon_frame = recon_frame.clamp_(0, 1)
@@ -96,8 +130,13 @@ def run_test(video_net, i_frame_net, args, device):
             save_path = os.path.join(temp_dir, f'im{str(frame_idx + 1).zfill(5)}.png')
             save_torch_image(x_hat, save_path)
 
-    bpp = sum(bits) / (frame_num * frame_pixel_num)
-    frames_dir = os.path.join(args['decoded_frame_folder'], str(bpp) + "_" + str(gop))
+    log_result = generate_log_json(frame_num, gop, frame_types, bits, frame_pixel_num)
+    result_name = "quality_" + str(args['rate_idx'])
+    frames_dir = os.path.join(args['decoded_frame_folder'], result_name)
+    json_path = os.path.join(args['decoded_frame_folder'], result_name + '.json')
+    shutil.rmtree(json_path, ignore_errors=True)
+    with open(json_path, 'w') as fp:
+        json.dump(log_result, fp)
     os.rename(temp_dir, frames_dir)
     shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -116,7 +155,6 @@ def decod_dcvc(dataset_dir: str,
                gop: int,
                rate_count: int,
                out_dir: str,
-               model_name: str,
                config):
     torch.backends.cudnn.enabled = True
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ":4096:8"
@@ -187,7 +225,7 @@ def decod_dcvc(dataset_dir: str,
 
     # Подготовка аргументов для DCVC-HEM
     video_folders = [f for f in os.scandir(dataset_dir) if f.is_dir()]
-    model_dir = os.path.join(out_dir, model_name)
+    model_dir = os.path.join(out_dir, config['name'])
     shutil.rmtree(model_dir, ignore_errors=True)
     os.makedirs(model_dir, exist_ok=True)
     for video_folder in video_folders:
@@ -248,11 +286,21 @@ def get_video_bpp(path, countable=True):
     return original_video_size / count / w / h
 
 
-def video_to_frames(video_path: str, out_dir: str, gop: int):
+def video_to_frames(video_path: str, out_dir: str, gop: int, quality_index: int):
     os.makedirs(out_dir, exist_ok=True)
 
+    result_name = "quality_" + str(quality_index)
+    json_path = os.path.join(out_dir, result_name + '.json')
+    shutil.rmtree(json_path, ignore_errors=True)
     bpp = get_video_bpp(video_path, countable=False)
-    frames_dir = os.path.join(out_dir, str(bpp) + "_" + str(gop))
+    log_result = dict(
+        gop=gop,
+        avg_bpp=bpp
+    )
+    with open(json_path, 'w') as fp:
+        json.dump(log_result, fp)
+
+    frames_dir = os.path.join(out_dir, result_name)
     shutil.rmtree(frames_dir, ignore_errors=True)
     os.makedirs(frames_dir, exist_ok=True)
 
@@ -291,29 +339,28 @@ def encode_folder(src_files, out_path, framerate: int, crf: int = 0, preset: str
 def decod_hevc(dataset_dir: str,
                out_dir: str,
                rate_num: int,
-               crf_start: int,
-               crf_end: int,
-               fps: int,
-               gop: int):
-    crfs = np.linspace(crf_start, crf_end, num=rate_num, dtype=np.int32).tolist()
-    model_dir = os.path.join(out_dir, 'hevc')
-    temp_dir = os.path.join(model_dir, 'temp')
+               gop: int,
+               config):
+    crfs = np.linspace(config['crf_start'], config['crf_end'], num=rate_num, dtype=np.int32).tolist()
+    codec_dir = os.path.join(out_dir, config['name'])
+    temp_dir = os.path.join(codec_dir, 'temp')
 
     video_folders = [f for f in os.scandir(dataset_dir) if f.is_dir()]
-    shutil.rmtree(model_dir, ignore_errors=True)
-    os.makedirs(model_dir, exist_ok=True)
+    shutil.rmtree(codec_dir, ignore_errors=True)
+    os.makedirs(codec_dir, exist_ok=True)
     for video_folder in video_folders:
         frames_dir = os.path.join(video_folder.path, 'images', "im%05d.png")
-        result_dir = os.path.join(model_dir, video_folder.name)
+        result_dir = os.path.join(codec_dir, video_folder.name)
         shutil.rmtree(temp_dir, ignore_errors=True)
         os.makedirs(temp_dir, exist_ok=True)
         shutil.rmtree(result_dir, ignore_errors=True)
         os.makedirs(result_dir, exist_ok=True)
 
-        for crf in crfs:
+        for index, crf in enumerate(crfs):
             out_filename_crf_custom = os.path.join(temp_dir, "crf_" + str(crf) + ".mp4")
-            encode_folder(frames_dir, out_filename_crf_custom, framerate=fps, crf=crf)
-            video_to_frames(out_filename_crf_custom, result_dir, gop)
+            encode_folder(frames_dir, out_filename_crf_custom, framerate=config['fps'], crf=crf,
+                          preset=config['preset'])
+            video_to_frames(out_filename_crf_custom, result_dir, gop, index)
 
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -334,15 +381,17 @@ def main():
     gop = config['gop']
     rate_count = config['rate_count']
     out_dir = config['out_dir']
-    for key, value in config['models'].items():
-        print(f'Decoding with {key}')
+    for key, value in config['codecs'].items():
         if key == 'HEVC':
-            crf_start = config['models'][key]['crf_start']
-            crf_end = config['models'][key]['crf_end']
-            fps = config['models'][key]['fps']
-            decod_hevc(dataset_dir, out_dir, rate_count, crf_start, crf_end, fps, gop)
-        elif 'DCVC-HEM' in key:
-            decod_dcvc(dataset_dir, gop, rate_count, out_dir, key, value)
+            for hevc_config in value:
+                name = hevc_config['name']
+                print(f'Decoding with {name}')
+                decod_hevc(dataset_dir, out_dir, rate_count, gop, hevc_config)
+        elif key == 'DCVC-HEM':
+            for dcvc_config in value:
+                name = dcvc_config['name']
+                print(f'Decoding with {name}')
+                decod_dcvc(dataset_dir, gop, rate_count, out_dir, dcvc_config)
         else:
             raise AttributeError("Invalid model in config file")
 
