@@ -1,4 +1,10 @@
 import logging
+import random
+import time
+
+import numpy as np
+import torch
+
 from .datasets import build_dataset
 from torch.utils.data import (
     Dataset,
@@ -14,10 +20,12 @@ def create_loader(dataset: Dataset,
                   shuffle: bool,
                   batch_size: int,
                   num_workers: int = 1,
-                  pin_memory: bool = True
-                 ):
+                  pin_memory: bool = True):
     if shuffle:
-        sampler = RandomSampler(dataset)
+        seed = int(time.time())
+        generator = torch.Generator()
+        generator.manual_seed(seed)
+        sampler = RandomSampler(dataset, generator=generator)
     else:
         sampler = SequentialSampler(dataset)
 
