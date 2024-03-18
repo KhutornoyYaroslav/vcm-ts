@@ -9,16 +9,20 @@ from torchvision.utils import make_grid
 from core.data import make_data_loader
 from torch.utils.tensorboard import SummaryWriter
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
+import torch.distributed as dist
+from core.modelling.model import build_model
+from core.utils.checkpoint import CheckPointer
+from core.solver import make_optimizer
+import cv2 as cv
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, device):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
 
-    data_loader = make_data_loader(cfg, False)
+    data_loader = make_data_loader(cfg, seed, False, True)
     model.eval()
-    device = torch.device(cfg.MODEL.DEVICE)
     result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device, cfg)
 
     torch.cuda.empty_cache()
@@ -34,6 +38,14 @@ def calc_max_epoch(cfg):
         epoch_counter += int(cfg.SOLVER.STAGES[i][6])
 
     return epoch_counter
+
+
+def get_current_stage(cfg, epoch):
+    epoch_counter = 0
+    for i in range(len(cfg.SOLVER.STAGES)):
+        epoch_counter += int(cfg.SOLVER.STAGES[i][6])
+        if epoch < epoch_counter:
+            return i
 
 
 def get_stage_params(cfg,
@@ -79,12 +91,7 @@ def get_stage_params(cfg,
         assert len(stage_params) == 7
 
     # Get current stage
-    epoch_counter = 0
-    for i in range(len(cfg.SOLVER.STAGES)):
-        epoch_counter += int(cfg.SOLVER.STAGES[i][6])
-        if epoch < epoch_counter:
-            result['stage'] = i
-            break
+    result['stage'] = get_current_stage(cfg, epoch)
 
     stage_params = cfg.SOLVER.STAGES[result['stage']]
 
@@ -94,15 +101,15 @@ def get_stage_params(cfg,
 
     # Modules to train
     if stage_params[1] == 'me' and stage_params[4] == 'none':
-        model.activate_modules_inter_dist()
+        model.module.activate_modules_inter_dist()
     elif stage_params[1] == 'me' and stage_params[4] == 'me':
-        model.activate_modules_inter_dist_rate()
+        model.module.activate_modules_inter_dist_rate()
     elif stage_params[1] == 'rec' and stage_params[4] == 'none':
-        model.activate_modules_recon_dist()
+        model.module.activate_modules_recon_dist()
     elif stage_params[1] == 'rec' and stage_params[4] == 'rec':
-        model.activate_modules_recon_dist_rate()
+        model.module.activate_modules_recon_dist_rate()
     elif stage_params[1] == 'all' and stage_params[4] == 'all':
-        model.activate_modules_all()
+        model.module.activate_modules_all()
     else:
         raise SystemError('Invalid pair of part and loss rate')
 
@@ -140,12 +147,34 @@ def get_stage_params(cfg,
     return result
 
 
+def init_model(cfg, device, logger, arguments):
+    # Create model
+    model = build_model(cfg, device).to(device)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device], find_unused_parameters=True)
+
+    # Create optimizer
+    optimizer = make_optimizer(cfg, model)
+
+    # Create checkpointer
+    save_to_disk = dist_util.is_main_process()
+    checkpointer = CheckPointer(model, optimizer, None, cfg.OUTPUT_DIR, save_to_disk, logger)
+    extra_checkpoint_data = checkpointer.load(cfg.MODEL.PRETRAINED_WEIGHTS)
+    arguments.update(extra_checkpoint_data)
+
+    return model, optimizer, checkpointer
+
+
+def reinit_model(model, optimizer, checkpointer, cfg, device, logger, arguments):
+    del checkpointer
+    del optimizer
+    del model
+    torch.cuda.empty_cache()
+
+    return init_model(cfg, device, logger, arguments)
+
+
 def do_train(cfg,
-             model,
              data_loader,
-             optimizer,
-             scheduler,
-             checkpointer,
              device,
              arguments,
              args):
@@ -154,6 +183,8 @@ def do_train(cfg,
 
     logger = logging.getLogger("CORE")
     logger.info("Start training ...")
+
+    model, optimizer, checkpointer = init_model(cfg, device, logger, arguments)
 
     # Set model to train mode
     model.train()
@@ -166,19 +197,28 @@ def do_train(cfg,
         summary_writer = None
 
     # Prepare to train
-    iters_per_epoch = len(data_loader)
+    iters_per_epoch = len(data_loader) * args.num_gpus
     max_epoch = calc_max_epoch(cfg)
     total_steps = iters_per_epoch * max_epoch
     start_epoch = arguments["epoch"]
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
+    current_stage = get_current_stage(cfg, start_epoch)
 
     # Epoch loop
     for epoch in range(start_epoch, max_epoch):
+        data_loader.sampler.set_epoch(epoch)
         arguments["epoch"] = epoch + 1
 
+        if current_stage != get_current_stage(cfg, epoch):
+            model, optimizer, checkpointer = reinit_model(model, optimizer, checkpointer,
+                                                          cfg, device, logger, arguments)
+            current_stage = get_current_stage(cfg, epoch)
+            dist.barrier()
+
         # Create progress bar
-        print(('\n' + '%12s' * 6 + '%25s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'mse', 'bpp', 'psnr'))
+        if dist_util.is_main_process():
+            print(('\n' + '%12s' * 6 + '%25s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'mse', 'bpp', 'psnr'))
 
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
@@ -201,12 +241,25 @@ def do_train(cfg,
         stage_params = get_stage_params(cfg, model, optimizer, epoch)
 
         total_iterations = 0
+        dist.barrier()
         for iteration, data_entry in pbar:
-            global_step = epoch * iters_per_epoch + iteration
+            global_step = epoch * iters_per_epoch + iteration * args.num_gpus
 
             # Get data
             input, _ = data_entry  # (N, T, C, H, W)
             input = input.to(device)
+
+            # if iteration == 0:
+            #     for i in range(input.shape[0]):
+            #         input_show = input[i][0]
+            #         input_show = (input_show.cpu().numpy() * 255).astype(np.uint8).transpose(1, 2, 0)
+            #
+            #         input_show = cv.cvtColor(input_show, cv.COLOR_RGB2BGR)
+            #
+            #         cv.imshow(f'GPU_{device}_input_{i}', input_show)
+            #
+            #         if cv.waitKey(0) & 0xFF == ord('q'):
+            #             continue
 
             # Optimize model
             outputs = model(stage_params['forward_method'],
@@ -240,30 +293,63 @@ def do_train(cfg,
                                                             )
             pbar.set_description(s)
 
-            add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
+            if dist_util.is_main_process():
+                add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
 
-        stats['loss_sum'] /= total_iterations
-        stats['bpp'] /= total_iterations
-        stats['mse_sum'] /= total_iterations
-        stats['psnr'] /= total_iterations
-        stats['lr'] = optimizer.param_groups[0]["lr"]
-        stats['stage'] = stage_params['stage'] + 1
-        stats['best_samples'] = best_samples
-        stats['worst_samples'] = worst_samples
+        # Receive metrics from gpus
+        iterations = [None for _ in range(args.num_gpus)]
+        loss_sum = [None for _ in range(args.num_gpus)]
+        bpp = [None for _ in range(args.num_gpus)]
+        psnr = [None for _ in range(args.num_gpus)]
 
-        # Update learning rate
-        if scheduler is not None:
-            scheduler.step()
+        dist.gather_object(
+            total_iterations,
+            iterations if dist_util.is_main_process() else None,
+            dst=0
+        )
+        dist.gather_object(
+            stats['loss_sum'],
+            loss_sum if dist_util.is_main_process() else None,
+            dst=0
+        )
+        dist.gather_object(
+            stats['bpp'],
+            bpp if dist_util.is_main_process() else None,
+            dst=0
+        )
+        dist.gather_object(
+            stats['psnr'],
+            psnr if dist_util.is_main_process() else None,
+            dst=0
+        )
+
+        if dist_util.is_main_process():
+            total_iterations = sum(iterations)
+            stats['loss_sum'] = sum(loss_sum)
+            stats['bpp'] = np.sum(bpp, axis=0)
+            stats['psnr'] = np.sum(psnr, axis=0)
+
+            stats['loss_sum'] /= total_iterations
+            stats['bpp'] /= total_iterations
+            stats['mse_sum'] /= total_iterations
+            stats['psnr'] /= total_iterations
+            stats['lr'] = optimizer.param_groups[0]["lr"]
+            stats['stage'] = stage_params['stage'] + 1
+            stats['best_samples'] = best_samples
+            stats['worst_samples'] = worst_samples
 
         # Do evaluation
-        if (args.eval_step > 0) and (epoch % args.eval_step == 0) and len(cfg.DATASET.TEST_ROOT_DIRS):
+        if ((args.eval_step > 0) and (epoch % args.eval_step == 0) and len(cfg.DATASET.TEST_ROOT_DIRS)
+                and dist_util.is_main_process()):
             print('\nEvaluation ...')
             result_dict = do_eval(cfg,
                                   model,
                                   stage_params['forward_method'],
                                   stage_params['loss_dist_key'],
                                   stage_params['loss_rate_keys'],
-                                  stage_params['p_frames'])
+                                  stage_params['p_frames'],
+                                  args.seed,
+                                  device)
 
             print(('\n' + 'Evaluation results:' + '%12s' * 2 + '%25s' * 2) % ('loss', 'mse', 'bpp', 'psnr'))
             bpp_print = [f'{x:.2f}' for x in result_dict['bpp']]

@@ -1,9 +1,8 @@
 import torch
 
 
-def make_optimizer(cfg, model: torch.nn.Module, num_gpus: int = 1) -> torch.optim.Optimizer:
-    lr_scale = num_gpus if (cfg.MODEL.DEVICE == 'cuda') else 1
-    lr = float(cfg.SOLVER.LR) * lr_scale
+def make_optimizer(cfg, model: torch.nn.Module) -> torch.optim.Optimizer:
+    lr = float(cfg.SOLVER.LR)
 
     params = []
     for p in model.parameters():

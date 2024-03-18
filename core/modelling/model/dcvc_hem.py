@@ -5,11 +5,11 @@ from DCVC_HEM.src.models.video_model import DMC
 
 
 class DCVC_HEM(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, device):
         super().__init__()
         self.cfg = cfg
         self.dmc = DMC(anchor_num=len(cfg.SOLVER.LAMBDAS))
-        self.lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).to(cfg.MODEL.DEVICE)
+        self.lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).to(device)
         self.lambdas.requires_grad = False
 
         self.inter_modules_dist = [
@@ -324,3 +324,16 @@ class DCVC_HEM(nn.Module):
         result['decod_seqs'] = result['decod_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
 
         return result
+
+    def forward(self,
+                forward_method: str,
+                input: torch.Tensor,
+                optimizer: torch.optim.Optimizer,
+                loss_dist_key: str,
+                loss_rate_keys: List[str],
+                p_frames: int,
+                is_train=True):
+        if forward_method == 'single':
+            return self.forward_single(input, optimizer, loss_dist_key, loss_rate_keys, p_frames, is_train)
+        elif forward_method == 'cascade':
+            return self.forward_cascade(input, optimizer, loss_dist_key, loss_rate_keys, p_frames, is_train)

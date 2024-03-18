@@ -4,7 +4,8 @@ import torch
 from tqdm import tqdm
 from core.utils.tensorboard import add_best_and_worst_sample
 
-def eval_dataset(forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device, cfg):
+
+def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device, cfg):
     logger = logging.getLogger("CORE.inference")
 
     # Iteration loop
@@ -29,7 +30,13 @@ def eval_dataset(forward_method, loss_dist_key, loss_rate_keys, p_frames, data_l
             input = input.to(device)
 
             # Do prediction
-            outputs = forward_method(input, None, loss_dist_key, loss_rate_keys, p_frames=p_frames, is_train=False)
+            outputs = model(forward_method,
+                            input,
+                            None,
+                            loss_dist_key,
+                            loss_rate_keys,
+                            p_frames=p_frames,
+                            is_train=False)
 
         stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (T-1) -> (1)
         stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
