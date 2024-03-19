@@ -10,8 +10,10 @@ from pytorch_msssim import MS_SSIM
 from torchmetrics.detection import MeanAveragePrecision
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from ultralytics import YOLO
 
 from DCVC_HEM.src.utils.png_reader import PNGReader
+from DCVC_HEM.src.utils.stream_helper import get_padding_size
 
 
 def np_image_to_tensor(img):
@@ -38,13 +40,14 @@ def str2bool(v):
 
 
 def delete_unsupported_annotations(annotations, classes):
-    for annotation in annotations:
-        mask = torch.ones(annotation['labels'].shape[0], dtype=torch.bool)
-        for i in range(annotation['labels'].shape[0]):
-            mask[i] = annotation['labels'][i].item() in classes
-        annotation['boxes'] = annotation['boxes'][mask]
-        annotation['labels'] = annotation['labels'][mask]
-        annotation['scores'] = annotation['scores'][mask]
+    for key in annotations.keys():
+        for annotation in annotations[key]:
+            mask = torch.ones(annotation['labels'].shape[0], dtype=torch.bool)
+            for i in range(annotation['labels'].shape[0]):
+                mask[i] = annotation['labels'][i].item() in classes
+            annotation['boxes'] = annotation['boxes'][mask]
+            annotation['labels'] = annotation['labels'][mask]
+            annotation['scores'] = annotation['scores'][mask]
 
 
 def read_dataset(dataset_dir: str,
@@ -102,6 +105,25 @@ def forward_rcnn(rcnn, x):
         return output
 
 
+def forward_yolo(yolo, x):
+    output = {}
+    with torch.no_grad():
+        pic_height = x.shape[2]
+        pic_width = x.shape[3]
+        padding_l, padding_r, padding_t, padding_b = get_padding_size(pic_height, pic_width, p=32)
+        x_padded = torch.nn.functional.pad(
+            x,
+            (padding_l, padding_r, padding_t, padding_b),
+            mode="constant",
+            value=0,
+        )
+        result = yolo(x_padded, imgsz=(x_padded.shape[2], x_padded.shape[3]), verbose=False)[0]  # batch = 1
+        output['boxes'] = result.boxes.xyxy.cpu()
+        output['labels'] = result.boxes.cls.cpu().type(torch.int64) + 1  # yolo names start from 0
+        output['scores'] = result.boxes.conf.cpu()
+        return output
+
+
 def calculate_metrics(dataset,
                       images,
                       annotations,
@@ -112,9 +134,12 @@ def calculate_metrics(dataset,
 
     dataset_images = dataset[video_name]['images']
     dataset_annotations = dataset[video_name]['annotations']
-    metric_map.update(annotations, dataset_annotations)
-    map_metrics = metric_map.compute()
-    mean_ap = map_metrics['map_50'].item()
+    mean_ap = {}
+    for model in annotations.keys():
+        metric_map.update(annotations[model], dataset_annotations)
+        map_metrics = metric_map.compute()
+        model_mean_ap = map_metrics['map_50'].item()
+        mean_ap[model] = model_mean_ap
 
     psnr_list = []
     ssim_list = []
@@ -136,6 +161,7 @@ def calculate_metrics(dataset,
 
 def get_metrics(decod_dir: str,
                 rcnn,
+                yolo,
                 dataset,
                 device: str,
                 use_ms_ssim: bool):
@@ -164,7 +190,10 @@ def get_metrics(decod_dir: str,
                     frame_bpp = seq_info['frame_bpp']
                 print(f'\t\tCalculate metrics for sequence with bpp = {bpp} and gop = {gop}')
                 images = []
-                annotations = []
+                annotations = {
+                    'rcnn': [],
+                    'yolo': []
+                }
                 source_images = sorted(glob(os.path.join(images_folder, "*.png")))
 
                 print(f'\t\tObjects detection')
@@ -174,11 +203,13 @@ def get_metrics(decod_dir: str,
                     image = np_image_to_tensor(rgb)
                     image = image.to(device)
 
-                    output = forward_rcnn(rcnn, image)
+                    rcnn_output = forward_rcnn(rcnn, image)
+                    yolo_output = forward_yolo(yolo, image)
                     image = image.cpu()
                     torch.cuda.empty_cache()
                     images.append(image)
-                    annotations.append(output)
+                    annotations['rcnn'].append(rcnn_output)
+                    annotations['yolo'].append(yolo_output)
 
                 delete_unsupported_annotations(annotations, dataset['classes'])
 
@@ -201,22 +232,24 @@ def get_metrics(decod_dir: str,
 def plot_graphs(metrics, out_path: str, use_ms_ssim: bool):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
+    detection_models = sorted(list(metrics[codecs[0]][videos[0]][0]['mean_ap'].keys()))
     os.makedirs(out_path, exist_ok=True)
 
     for video in videos:
-        for codec in codecs:
-            bpps = [info['bpp'] for info in metrics[codec][video]]
-            maps = [info['mean_ap'] for info in metrics[codec][video]]
-            x = np.array(bpps)
-            y = np.array(maps)
-            plt.plot(x, y, 'o-', label=codec)
-        plt.legend()
-        plt.grid()
-        plt.title(f'Object detection performance for {video}')
-        plt.xlabel('bpp')
-        plt.ylabel('mAP@0.5 (%)')
-        plt.savefig(os.path.join(out_path, f"detection_{video}.png"))
-        plt.show()
+        for detection_model in detection_models:
+            for codec in codecs:
+                bpps = [info['bpp'] for info in metrics[codec][video]]
+                maps = [info['mean_ap'][detection_model] for info in metrics[codec][video]]
+                x = np.array(bpps)
+                y = np.array(maps)
+                plt.plot(x, y, 'o-', label=codec)
+            plt.legend()
+            plt.grid()
+            plt.title(f'Object detection performance on {detection_model} for {video}')
+            plt.xlabel('bpp')
+            plt.ylabel('mAP@0.5 (%)')
+            plt.savefig(os.path.join(out_path, f"detection_model_{detection_model}_{video}.png"))
+            plt.show()
 
         for codec in codecs:
             bpps = [info['bpp'] for info in metrics[codec][video]]
@@ -299,7 +332,11 @@ def main():
     rcnn = rcnn.to(args.device)
     rcnn.eval()
 
-    metrics = get_metrics(args.decod_dir, rcnn, dataset, args.device, args.ms_ssim)
+    yolo = YOLO('yolov8n.pt')
+    yolo = yolo.to(args.device)
+    # yolo.eval()
+
+    metrics = get_metrics(args.decod_dir, rcnn, yolo, dataset, args.device, args.ms_ssim)
 
     plot_graphs(metrics, args.out_path, args.ms_ssim)
 
