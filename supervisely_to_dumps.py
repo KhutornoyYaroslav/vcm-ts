@@ -85,6 +85,25 @@ def convert_anno(path: str,
                  video_filename: str,
                  yolo_class_id_map: dict,
                  filename_template="im%05d.txt"):
+    video_type = video_filename.split('_')[-1]
+
+    # Object detection
+    if video_type == 'short':
+        res_folder_detector_yolo = os.path.join(result_root, video_filename, 'object_detection')
+        shutil.rmtree(res_folder_detector_yolo, ignore_errors=True)
+        os.makedirs(res_folder_detector_yolo, exist_ok=True)
+
+    if video_type == 'liplates':
+        # License plate detection
+        res_folder_lpdetector_yolo = os.path.join(result_root, video_filename, 'license_detection')
+        shutil.rmtree(res_folder_lpdetector_yolo, ignore_errors=True)
+        os.makedirs(res_folder_lpdetector_yolo, exist_ok=True)
+
+        # License plate detection + recognition
+        res_folder_lprdetector_yolo = os.path.join(result_root, video_filename, 'license_recognition')
+        shutil.rmtree(res_folder_lprdetector_yolo, ignore_errors=True)
+        os.makedirs(res_folder_lprdetector_yolo, exist_ok=True)
+
     # Convert annotation
     with open(path, 'r') as f:
         data = json.load(f)
@@ -129,33 +148,20 @@ def convert_anno(path: str,
                 labels.append(yolo_class_id_map[class_name])
 
         # Object detection
-        if boxes:
-            res_folder_detector_yolo = os.path.join(result_root, video_filename, 'object_detection')
-            shutil.rmtree(res_folder_detector_yolo, ignore_errors=True)
-            os.makedirs(res_folder_detector_yolo, exist_ok=True)
-
+        if video_type == 'short':
             filepath = os.path.join(res_folder_detector_yolo, filename_template % frame_id)
             with open(filepath, 'w') as f:
                 for label, box in zip(labels, boxes):
                     f.write('%d %d %d %d %d\n' % (label, box[0], box[1], box[2], box[3]))
 
-        # License plate detection
-        if lp_boxes:
-            res_folder_lpdetector_yolo = os.path.join(result_root, video_filename, 'license_detection')
-            shutil.rmtree(res_folder_lpdetector_yolo, ignore_errors=True)
-            os.makedirs(res_folder_lpdetector_yolo, exist_ok=True)
-
+        if video_type == 'liplates':
+            # License plate detection
             filepath = os.path.join(res_folder_lpdetector_yolo, filename_template % frame_id)
             with open(filepath, 'w') as f:
                 for box in lp_boxes:
                     f.write('%d %d %d %d\n' % (box[0], box[1], box[2], box[3]))
 
-        # License plate detection + recognition
-        if lpr_boxes:
-            res_folder_lprdetector_yolo = os.path.join(result_root, video_filename, 'license_recognition')
-            shutil.rmtree(res_folder_lprdetector_yolo, ignore_errors=True)
-            os.makedirs(res_folder_lprdetector_yolo, exist_ok=True)
-
+            # License plate detection + recognition
             filepath = os.path.join(res_folder_lprdetector_yolo, filename_template % frame_id)
             with open(filepath, 'w') as f:
                 for text, box in zip(lpr_texts, lpr_boxes):
