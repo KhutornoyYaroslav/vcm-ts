@@ -85,11 +85,6 @@ def convert_anno(path: str,
                  video_filename: str,
                  yolo_class_id_map: dict,
                  filename_template="im%05d.txt"):
-    # Object detection
-    res_folder_detector_yolo = os.path.join(result_root, video_filename, 'annotations')
-    shutil.rmtree(res_folder_detector_yolo, ignore_errors=True)
-    os.makedirs(res_folder_detector_yolo, exist_ok=True)
-
     # Convert annotation
     with open(path, 'r') as f:
         data = json.load(f)
@@ -102,20 +97,69 @@ def convert_anno(path: str,
         frame_id = frame_data['index'] + 1
 
         boxes = []
+        lp_boxes = []
+        lpr_boxes = []
+        lpr_texts = []
         labels = []
         for figure_data in frame_data['figures']:
             class_name = obj_class_map[figure_data['objectKey']]
             [x1, y1], [x2, y2] = figure_data['geometry']['points']['exterior']
 
-            boxes.append([x1, y1, x2, y2])
-            labels.append(yolo_class_id_map[class_name])
+            if class_name == "liplate":
+                # License plate detection
+                lp_boxes.append([x1, y1, x2, y2])
+
+                # License plate detection + recognition
+                obj_tags = []
+                for obj in data['objects']:
+                    if obj['key'] == figure_data['objectKey']:
+                        obj_tags = obj['tags']
+
+                liplate_text = None
+                for tag in obj_tags:
+                    if tag['name'] == "text":
+                        liplate_text = tag['value']
+                        break
+
+                lpr_boxes.append([x1, y1, x2, y2])
+                lpr_texts.append(liplate_text)
+            else:
+                # Object detection
+                boxes.append([x1, y1, x2, y2])
+                labels.append(yolo_class_id_map[class_name])
 
         # Object detection
-        filepath = os.path.join(res_folder_detector_yolo, filename_template % frame_id)
+        if boxes:
+            res_folder_detector_yolo = os.path.join(result_root, video_filename, 'object_detection')
+            shutil.rmtree(res_folder_detector_yolo, ignore_errors=True)
+            os.makedirs(res_folder_detector_yolo, exist_ok=True)
 
-        with open(filepath, 'w') as f:
-            for label, box in zip(labels, boxes):
-                f.write('%d %d %d %d %d\n' % (label, box[0], box[1], box[2], box[3]))
+            filepath = os.path.join(res_folder_detector_yolo, filename_template % frame_id)
+            with open(filepath, 'w') as f:
+                for label, box in zip(labels, boxes):
+                    f.write('%d %d %d %d %d\n' % (label, box[0], box[1], box[2], box[3]))
+
+        # License plate detection
+        if lp_boxes:
+            res_folder_lpdetector_yolo = os.path.join(result_root, video_filename, 'license_detection')
+            shutil.rmtree(res_folder_lpdetector_yolo, ignore_errors=True)
+            os.makedirs(res_folder_lpdetector_yolo, exist_ok=True)
+
+            filepath = os.path.join(res_folder_lpdetector_yolo, filename_template % frame_id)
+            with open(filepath, 'w') as f:
+                for box in lp_boxes:
+                    f.write('%d %d %d %d\n' % (box[0], box[1], box[2], box[3]))
+
+        # License plate detection + recognition
+        if lpr_boxes:
+            res_folder_lprdetector_yolo = os.path.join(result_root, video_filename, 'license_recognition')
+            shutil.rmtree(res_folder_lprdetector_yolo, ignore_errors=True)
+            os.makedirs(res_folder_lprdetector_yolo, exist_ok=True)
+
+            filepath = os.path.join(res_folder_lprdetector_yolo, filename_template % frame_id)
+            with open(filepath, 'w') as f:
+                for text, box in zip(lpr_texts, lpr_boxes):
+                    f.write('%s %d %d %d %d\n' % (text, box[0], box[1], box[2], box[3]))
 
 
 def video_to_images(video_path: str, out_path: str):
@@ -143,14 +187,20 @@ def main():
         "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_0_short.mp4.json",
         "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_10_short.mp4.json",
         "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_18_short.mp4.json",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_21_short.mp4.json"
+        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_21_short.mp4.json",
+        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_liplates/ds0/ann/test_14_liplates.mp4.json",
+        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_liplates/ds0/ann/test_18_liplates.mp4.json",
+        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_liplates/ds0/ann/test_20_liplates.mp4.json"
     ]
-    out_path = "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark"
+    out_path = "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/dataset"
     video_paths = [
         "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_0_short.mp4",
         "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_10_short.mp4",
         "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_18_short.mp4",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_21_short.mp4"
+        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_21_short.mp4",
+        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_14_liplates.mp4",
+        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_18_liplates.mp4",
+        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_20_liplates.mp4"
     ]
 
     for anno_path, video_path in zip(anno_paths, video_paths):
@@ -162,6 +212,11 @@ def main():
         os.makedirs(images_path, exist_ok=True)
         images_path = os.path.join(images_path, "im%05d.png")
         video_to_images(video_path, images_path)
+
+    metadata_path = os.path.join(out_path, 'metadata.txt')
+    with open(metadata_path, 'w') as f:
+        for _class, _number in _COCO_CLASS_ID_MAP.items():
+            f.write('%d: %s\n' % (_number, _class))
 
     # convert_anno(args.anno_path, args.result_root, _COCO_CLASS_ID_MAP)
     # visualize_anno(args.video_path, args.result_root, _COLOR_MAP)
