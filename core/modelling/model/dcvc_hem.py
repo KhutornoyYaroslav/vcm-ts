@@ -5,11 +5,11 @@ from DCVC_HEM.src.models.video_model import DMC
 
 
 class DCVC_HEM(nn.Module):
-    def __init__(self, cfg, device):
+    def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
         self.dmc = DMC(anchor_num=len(cfg.SOLVER.LAMBDAS))
-        self.lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).to(device)
+        self.lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).cuda()
         self.lambdas.requires_grad = False
 
         self.inter_modules_dist = [

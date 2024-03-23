@@ -16,14 +16,14 @@ from core.solver import make_optimizer
 import cv2 as cv
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, device):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
 
     data_loader = make_data_loader(cfg, seed, False, True)
     model.eval()
-    result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device, cfg)
+    result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -147,13 +147,15 @@ def get_stage_params(cfg,
     return result
 
 
-def init_model(cfg, device, logger, arguments):
+def init_model(cfg, logger, arguments):
     # Create model
-    model = build_model(cfg, device).to(device)
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device], find_unused_parameters=True)
+    model = build_model(cfg).cuda()
+    local_rank = int(os.environ['LOCAL_RANK'])
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
 
     # Create optimizer
-    optimizer = make_optimizer(cfg, model)
+    num_gpus = int(os.environ['WORLD_SIZE'])
+    optimizer = make_optimizer(cfg, model, num_gpus)
 
     # Create checkpointer
     save_to_disk = dist_util.is_main_process()
@@ -164,18 +166,17 @@ def init_model(cfg, device, logger, arguments):
     return model, optimizer, checkpointer
 
 
-def reinit_model(model, optimizer, checkpointer, cfg, device, logger, arguments):
+def reinit_model(model, optimizer, checkpointer, cfg, logger, arguments):
     del checkpointer
     del optimizer
     del model
     torch.cuda.empty_cache()
 
-    return init_model(cfg, device, logger, arguments)
+    return init_model(cfg, logger, arguments)
 
 
 def do_train(cfg,
              data_loader,
-             device,
              arguments,
              args):
     np.set_printoptions(precision=3)
@@ -184,7 +185,7 @@ def do_train(cfg,
     logger = logging.getLogger("CORE")
     logger.info("Start training ...")
 
-    model, optimizer, checkpointer = init_model(cfg, device, logger, arguments)
+    model, optimizer, checkpointer = init_model(cfg, logger, arguments)
 
     # Set model to train mode
     model.train()
@@ -212,7 +213,7 @@ def do_train(cfg,
 
         if current_stage != get_current_stage(cfg, epoch):
             model, optimizer, checkpointer = reinit_model(model, optimizer, checkpointer,
-                                                          cfg, device, logger, arguments)
+                                                          cfg, logger, arguments)
             current_stage = get_current_stage(cfg, epoch)
             dist.barrier()
 
@@ -247,7 +248,7 @@ def do_train(cfg,
 
             # Get data
             input, _ = data_entry  # (N, T, C, H, W)
-            input = input.to(device)
+            input = input.cuda()
 
             # if iteration == 0:
             #     for i in range(input.shape[0]):
@@ -348,8 +349,7 @@ def do_train(cfg,
                                   stage_params['loss_dist_key'],
                                   stage_params['loss_rate_keys'],
                                   stage_params['p_frames'],
-                                  args.seed,
-                                  device)
+                                  args.seed)
 
             print(('\n' + 'Evaluation results:' + '%12s' * 2 + '%25s' * 2) % ('loss', 'mse', 'bpp', 'psnr'))
             bpp_print = [f'{x:.2f}' for x in result_dict['bpp']]

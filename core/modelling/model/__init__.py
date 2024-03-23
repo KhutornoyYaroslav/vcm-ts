@@ -6,6 +6,6 @@ _MODEL_ARCHITECTURES = {
 }
 
 
-def build_model(cfg, device):
+def build_model(cfg):
     meta_arch = _MODEL_ARCHITECTURES[cfg.MODEL.ARCHITECTURE]
-    return meta_arch(cfg, device)
+    return meta_arch(cfg)

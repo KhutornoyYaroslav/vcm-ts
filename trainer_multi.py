@@ -13,23 +13,31 @@ from core.utils import dist_util
 from core.utils.logger import setup_logger
 
 
-def setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+def init_distributed():
+    # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+    dist_url = "env://" # default
 
-    # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    # only works with torch.distributed.launch // torch.run
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ['WORLD_SIZE'])
+    local_rank = int(os.environ['LOCAL_RANK'])
+
+    dist.init_process_group(
+            backend="nccl",
+            init_method=dist_url,
+            world_size=world_size,
+            rank=rank)
 
     # this will make all .cuda() calls work properly
-    torch.cuda.set_device(rank)
+    torch.cuda.set_device(local_rank)
+
+    print(f"Running DDP on rank {rank}.")
 
     # synchronizes all the threads to reach this point before moving on
     dist.barrier()
 
 
-def train_model(cfg, args, rank):
-    device = rank
-
+def train_model(cfg, args):
     # Create data loader
     data_loader = make_data_loader(cfg, args.seed, is_train=True, is_multi_gpu=True)
 
@@ -37,7 +45,7 @@ def train_model(cfg, args, rank):
 
     dist.barrier()
     # Train model
-    model = do_train(cfg, data_loader, device, arguments, args)
+    model = do_train(cfg, data_loader, arguments, args)
 
     return model
 
@@ -46,9 +54,7 @@ def str2bool(s):
     return s.lower() in ('true', '1')
 
 
-def main(rank, world_size, seed):
-    print(f"Running DDP on rank {rank}.")
-    setup(rank, world_size)
+def main(seed):
     # Create argument parser
     parser = argparse.ArgumentParser(description='DCVC Video Compression Model Training With PyTorch')
     parser.add_argument("--config-file", dest="config_file", required=False, type=str, default="configs/cfg.yaml",
@@ -63,7 +69,7 @@ def main(rank, world_size, seed):
                         help="Modify config options using the command-line")
 
     args = parser.parse_args()
-    NUM_GPUS = world_size
+    NUM_GPUS = int(os.environ['WORLD_SIZE'])
     args.distributed = True
     args.num_gpus = NUM_GPUS
     args.seed = seed
@@ -94,15 +100,10 @@ def main(rank, world_size, seed):
             cfg_dump.write(str(cfg))
 
     # Train model
-    model = train_model(cfg, args, rank)
+    model = train_model(cfg, args)
 
 
 if __name__ == '__main__':
-    n_gpus = torch.cuda.device_count()
-    assert n_gpus >= 2, f"Requires at least 2 GPUs to run, but got {n_gpus}"
-    world_size = n_gpus
+    init_distributed()
     seed = int(time.time())
-    mp.spawn(main,
-             args=(world_size, seed),
-             nprocs=world_size,
-             join=True)
+    main(seed)

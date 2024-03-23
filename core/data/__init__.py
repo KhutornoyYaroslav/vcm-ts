@@ -24,7 +24,7 @@ def create_distributed_loader(dataset: Dataset,
     if shuffle:
         sampler = DistributedSampler(dataset, shuffle=shuffle, seed=seed, drop_last=True)
         data_loader = DataLoader(dataset, num_workers=num_workers, batch_size=batch_size, sampler=sampler,
-                                 pin_memory=pin_memory)
+                                 pin_memory=pin_memory, drop_last=True)
     else:
         sampler = SequentialSampler(dataset)
         batch_sampler = BatchSampler(sampler=sampler, batch_size=batch_size, drop_last=True)

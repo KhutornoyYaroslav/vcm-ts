@@ -11,15 +11,14 @@ from torch.utils.tensorboard import SummaryWriter
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
 
-    data_loader = make_data_loader(cfg, False)
+    data_loader = make_data_loader(cfg, seed, False)
     model.eval()
-    device = torch.device(cfg.MODEL.DEVICE)
-    result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device, cfg)
+    result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -146,7 +145,7 @@ def do_train(cfg,
              optimizer,
              scheduler,
              checkpointer,
-             device,
+             seed,
              arguments,
              args):
     np.set_printoptions(precision=3)
@@ -206,7 +205,7 @@ def do_train(cfg,
 
             # Get data
             input, _ = data_entry  # (N, T, C, H, W)
-            input = input.to(device)
+            input = input.cuda()
 
             # Optimize model
             outputs = model(stage_params['forward_method'],
@@ -263,7 +262,8 @@ def do_train(cfg,
                                   stage_params['forward_method'],
                                   stage_params['loss_dist_key'],
                                   stage_params['loss_rate_keys'],
-                                  stage_params['p_frames'])
+                                  stage_params['p_frames'],
+                                  seed)
 
             print(('\n' + 'Evaluation results:' + '%12s' * 2 + '%25s' * 2) % ('loss', 'mse', 'bpp', 'psnr'))
             bpp_print = [f'{x:.2f}' for x in result_dict['bpp']]

@@ -19,7 +19,7 @@ def train_model(cfg, args):
     device = torch.device(cfg.MODEL.DEVICE)
 
     # Create model
-    model = build_model(cfg, device)
+    model = build_model(cfg)
     model.to(device)
 
     seed = int(time.time())
@@ -38,7 +38,7 @@ def train_model(cfg, args):
     arguments.update(extra_checkpoint_data)
 
     # Train model
-    model = do_train(cfg, model, data_loader, optimizer, scheduler, checkpointer, device, arguments, args)
+    model = do_train(cfg, model, data_loader, optimizer, scheduler, checkpointer, seed, arguments, args)
 
     return model
 

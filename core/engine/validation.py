@@ -5,7 +5,7 @@ from tqdm import tqdm
 from core.utils.tensorboard import add_best_and_worst_sample
 
 
-def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, device, cfg):
+def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg):
     logger = logging.getLogger("CORE.inference")
 
     # Iteration loop
@@ -27,7 +27,7 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
         # Forward images
         with torch.no_grad():
             # Forward data to GPU
-            input = input.to(device)
+            input = input.cuda()
 
             # Do prediction
             outputs = model(forward_method,
