@@ -51,7 +51,8 @@ def get_current_stage(cfg, epoch):
 def get_stage_params(cfg,
                      model: torch.nn.Module,
                      optimizer: torch.optim.Optimizer,
-                     epoch: int):
+                     epoch: int,
+                     num_gpus: int = 2):
     """
     Evaluates parameters of current training stage.
     List of parameters from configuration file for each stage:
@@ -72,6 +73,8 @@ def get_stage_params(cfg,
             Optimizer to update model parameters. Need to change learning rate.
         epoch : int
             Current epoch.
+        num_gpus : int
+            Number of GPUs.
 
     Returns:
         params : dict
@@ -142,7 +145,7 @@ def get_stage_params(cfg,
         raise SystemError('Invalid loss rate')
 
     # Learning rate
-    optimizer.param_groups[0]["lr"] = float(stage_params[5])
+    optimizer.param_groups[0]["lr"] = float(stage_params[5]) * num_gpus
 
     return result
 
@@ -239,7 +242,7 @@ def do_train(cfg,
         best_samples = [[] for _ in range(len(cfg.SOLVER.LAMBDAS))]
         worst_samples = [[] for _ in range(len(cfg.SOLVER.LAMBDAS))]
 
-        stage_params = get_stage_params(cfg, model, optimizer, epoch)
+        stage_params = get_stage_params(cfg, model, optimizer, epoch, args.num_gpus)
 
         total_iterations = 0
         dist.barrier()
@@ -251,13 +254,14 @@ def do_train(cfg,
             input = input.cuda()
 
             # if iteration == 0:
+            #     rank = int(os.environ["RANK"])
             #     for i in range(input.shape[0]):
             #         input_show = input[i][0]
             #         input_show = (input_show.cpu().numpy() * 255).astype(np.uint8).transpose(1, 2, 0)
             #
             #         input_show = cv.cvtColor(input_show, cv.COLOR_RGB2BGR)
             #
-            #         cv.imshow(f'GPU_{device}_input_{i}', input_show)
+            #         cv.imshow(f'GPU_{rank}_input_{i}', input_show)
             #
             #         if cv.waitKey(0) & 0xFF == ord('q'):
             #             continue
