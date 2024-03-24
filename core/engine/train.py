@@ -210,10 +210,10 @@ def do_train(cfg,
             # Optimize model
             outputs = model(stage_params['forward_method'],
                             input,
-                            optimizer,
                             stage_params['loss_dist_key'],
                             stage_params['loss_rate_keys'],
-                            stage_params['p_frames'])
+                            stage_params['p_frames'],
+                            optimizer=optimizer)
             total_iterations += outputs['single_forwards']
 
             # Update stats

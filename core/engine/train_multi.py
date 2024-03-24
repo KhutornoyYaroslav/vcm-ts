@@ -117,10 +117,10 @@ def get_stage_params(cfg,
         raise SystemError('Invalid pair of part and loss rate')
 
     # Train method
-    if stage_params[2] == 'single':
-        result['forward_method'] = 'single'
-    elif stage_params[2] == 'cascade':
-        result['forward_method'] = 'cascade'
+    if stage_params[2] == 'single_multi':
+        result['forward_method'] = 'single_multi'
+    elif stage_params[2] == 'cascade_multi':
+        result['forward_method'] = 'cascade_multi'
     else:
         raise SystemError('Invalid loss type')
 
@@ -176,6 +176,74 @@ def reinit_model(model, optimizer, checkpointer, cfg, logger, arguments):
     torch.cuda.empty_cache()
 
     return init_model(cfg, logger, arguments)
+
+
+def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
+    input_seqs = []
+    decod_seqs = []
+    input_seqs.append(input[:, t_i])
+    decod_seqs.append(input[:, t_i])
+
+    loss_list = []
+
+    # Forward P-frames
+    for p_idx in range(0, stage_params['p_frames']):
+        optimizer.zero_grad()
+        result = model(stage_params['forward_method'],
+                       input[:, t_i + 1 + p_idx],
+                       stage_params['loss_dist_key'],
+                       stage_params['loss_rate_keys'],
+                       dpb=dpb)
+        loss_to_opt = result['loss_to_opt']
+        loss_to_opt.backward()
+        optimizer.step()
+
+        dpb = result['dpb']
+
+        loss_list.append(result['loss'])
+
+        # rank = int(os.environ["RANK"])
+        # print(f'Final ({rank}) {t_i} {p_idx}: {model.module.dmc.mv_encoder[6].weight.grad[0, 0]}')
+
+        outputs['rate'].append(result['rate'])  # (N)
+        outputs['dist'].append(result['dist'])  # (N)
+        outputs['loss'].append(result['loss'])  # (N)
+        outputs['single_forwards'] += 1
+        input_seqs.append(result['input_seqs'])
+        decod_seqs.append(result['decod_seqs'])
+
+    loss_seq = torch.stack(loss_list, -1)  # (N, p_frames)
+    loss_seq = torch.mean(loss_seq, -1)  # (N, p_frames) -> (N)
+
+    outputs['loss_seq'].append(loss_seq)  # (N)
+    outputs['input_seqs'].append(torch.stack(input_seqs, -1))  # (N, p_frames + 1)
+    outputs['decod_seqs'].append(torch.stack(decod_seqs, -1))  # (N, p_frames + 1)
+
+
+def cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
+    optimizer.zero_grad()
+    result = model(stage_params['forward_method'],
+                   input,
+                   stage_params['loss_dist_key'],
+                   stage_params['loss_rate_keys'],
+                   dpb=dpb,
+                   p_frames=stage_params['p_frames'],
+                   t_i=t_i)
+    loss_to_opt = result['loss_to_opt']
+    loss_to_opt.backward()
+    optimizer.step()
+
+    # rank = int(os.environ["RANK"])
+    # print(f'Final ({rank}) {t_i}: {model.module.dmc.mv_encoder[6].weight.grad[0, 0]}')
+
+    outputs['rate'].append(result['rate'])  # (N)
+    outputs['dist'].append(result['dist'])  # (N)
+    outputs['loss'].append(result['loss'])  # (N)
+    outputs['loss_seq'].append(result['loss'])  # (N)
+    outputs['single_forwards'] += 1
+
+    outputs['input_seqs'].append(result['input_seqs'])  # (N, p_frames + 1)
+    outputs['decod_seqs'].append(result['decod_seqs'])  # (N, p_frames + 1)
 
 
 def do_train(cfg,
@@ -267,12 +335,42 @@ def do_train(cfg,
             #             continue
 
             # Optimize model
-            outputs = model(stage_params['forward_method'],
-                            input,
-                            optimizer,
-                            stage_params['loss_dist_key'],
-                            stage_params['loss_rate_keys'],
-                            stage_params['p_frames'])
+            n, t, c, h, w = input.shape
+            assert 0 < stage_params['p_frames'] < t
+
+            outputs = {
+                'rate': [],  # (N, (T - p_frames) * p_frames or T - p_frames)
+                'dist': [],  # (N, (T - p_frames) * p_frames or T - p_frames)
+                'loss': [],  # (N, (T - p_frames) * p_frames or T - p_frames)
+                'loss_seq': [],  # (N, T - p_frames)
+                'input_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
+                'decod_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
+                'single_forwards': 0
+            }
+
+            for t_i in range(0, t - stage_params['p_frames']):
+                # Initialize I-frame
+                dpb = {
+                    "ref_frame": input[:, t_i],
+                    "ref_feature": None,
+                    "ref_y": None,
+                    "ref_mv_y": None
+                }
+
+                if stage_params['forward_method'] == 'single_multi':
+                    single_step(input, model, stage_params, dpb, optimizer, t_i, outputs)
+                elif stage_params['forward_method'] == 'cascade_multi':
+                    cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs)
+
+            outputs['rate'] = torch.stack(outputs['rate'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
+            outputs['dist'] = torch.stack(outputs['dist'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
+            outputs['loss'] = torch.stack(outputs['loss'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
+            outputs['loss_seq'] = torch.stack(outputs['loss_seq'], -1)  # (N, T - p_frames)
+            outputs['input_seqs'] = torch.stack(outputs['input_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
+            outputs['input_seqs'] = outputs['input_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+            outputs['decod_seqs'] = torch.stack(outputs['decod_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
+            outputs['decod_seqs'] = outputs['decod_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+
             total_iterations += outputs['single_forwards']
 
             # Update stats
@@ -347,9 +445,10 @@ def do_train(cfg,
         if ((args.eval_step > 0) and (epoch % args.eval_step == 0) and len(cfg.DATASET.TEST_ROOT_DIRS)
                 and dist_util.is_main_process()):
             print('\nEvaluation ...')
+            forward_method = stage_params['forward_method'][:-len('_multi')]
             result_dict = do_eval(cfg,
                                   model,
-                                  stage_params['forward_method'],
+                                  forward_method,
                                   stage_params['loss_dist_key'],
                                   stage_params['loss_rate_keys'],
                                   stage_params['p_frames'],

@@ -32,7 +32,6 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
             # Do prediction
             outputs = model(forward_method,
                             input,
-                            None,
                             loss_dist_key,
                             loss_rate_keys,
                             p_frames=p_frames,
