@@ -276,6 +276,7 @@ def do_train(cfg,
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
     current_stage = get_current_stage(cfg, start_epoch)
+    rank = int(os.environ["RANK"])
 
     # Epoch loop
     for epoch in range(start_epoch, max_epoch):
@@ -290,7 +291,7 @@ def do_train(cfg,
 
         # Create progress bar
         if dist_util.is_main_process():
-            print(('\n' + '%12s' * 6 + '%25s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'mse', 'bpp', 'psnr'))
+            print(('\n' + '%12s' * 6 + '%25s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'rank', 'bpp', 'psnr'))
 
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
@@ -390,7 +391,7 @@ def do_train(cfg,
                                                             mem,
                                                             optimizer.param_groups[0]["lr"],
                                                             stats['loss_sum'] / total_iterations,
-                                                            stats['mse_sum'] / total_iterations,
+                                                            rank,
                                                             ", ".join(bpp),
                                                             ", ".join(psnr)
                                                             )
