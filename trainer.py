@@ -22,9 +22,8 @@ def train_model(cfg, args):
     model = build_model(cfg)
     model.to(device)
 
-    seed = int(time.time())
     # Create data loader
-    data_loader = make_data_loader(cfg, seed, is_train=True)
+    data_loader = make_data_loader(cfg, args.seed, is_train=True)
 
     # Create optimizer
     optimizer = make_optimizer(cfg, model)
@@ -38,7 +37,7 @@ def train_model(cfg, args):
     arguments.update(extra_checkpoint_data)
 
     # Train model
-    model = do_train(cfg, model, data_loader, optimizer, scheduler, checkpointer, seed, arguments, args)
+    model = do_train(cfg, model, data_loader, optimizer, scheduler, checkpointer, args.seed, arguments, args)
 
     return model
 
@@ -58,6 +57,8 @@ def main():
                         help='Evaluate datasets every eval_step, disabled when eval_step < 0')
     parser.add_argument('--use-tensorboard', dest="use_tensorboard", required=False, default=True, type=str2bool,
                         help='Use tensorboard summary writer')
+    parser.add_argument('--seed', dest="seed", required=False, default=0, type=int,
+                        help='Seed for data loader')
     parser.add_argument('opts', default=None, nargs=argparse.REMAINDER,
                         help="Modify config options using the command-line")
 

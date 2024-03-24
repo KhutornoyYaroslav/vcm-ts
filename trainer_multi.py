@@ -54,7 +54,7 @@ def str2bool(s):
     return s.lower() in ('true', '1')
 
 
-def main(seed):
+def main():
     # Create argument parser
     parser = argparse.ArgumentParser(description='DCVC Video Compression Model Training With PyTorch')
     parser.add_argument("--config-file", dest="config_file", required=False, type=str, default="configs/cfg.yaml",
@@ -65,6 +65,8 @@ def main(seed):
                         help='Evaluate datasets every eval_step, disabled when eval_step < 0')
     parser.add_argument('--use-tensorboard', dest="use_tensorboard", required=False, default=True, type=str2bool,
                         help='Use tensorboard summary writer')
+    parser.add_argument('--seed', dest="seed", required=False, default=0, type=int,
+                        help='Seed for data loader')
     parser.add_argument('opts', default=None, nargs=argparse.REMAINDER,
                         help="Modify config options using the command-line")
 
@@ -72,7 +74,6 @@ def main(seed):
     NUM_GPUS = int(os.environ['WORLD_SIZE'])
     args.distributed = True
     args.num_gpus = NUM_GPUS
-    args.seed = seed
 
     # Enable cudnn auto-tuner to find the best algorithm to use for your hardware.
     torch.manual_seed(1)
@@ -105,5 +106,4 @@ def main(seed):
 
 if __name__ == '__main__':
     init_distributed()
-    seed = int(time.time())
-    main(seed)
+    main()

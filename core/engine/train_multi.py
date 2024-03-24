@@ -51,8 +51,7 @@ def get_current_stage(cfg, epoch):
 def get_stage_params(cfg,
                      model: torch.nn.Module,
                      optimizer: torch.optim.Optimizer,
-                     epoch: int,
-                     num_gpus: int = 2):
+                     epoch: int):
     """
     Evaluates parameters of current training stage.
     List of parameters from configuration file for each stage:
@@ -73,8 +72,6 @@ def get_stage_params(cfg,
             Optimizer to update model parameters. Need to change learning rate.
         epoch : int
             Current epoch.
-        num_gpus : int
-            Number of GPUs.
 
     Returns:
         params : dict
@@ -145,7 +142,7 @@ def get_stage_params(cfg,
         raise SystemError('Invalid loss rate')
 
     # Learning rate
-    optimizer.param_groups[0]["lr"] = float(stage_params[5]) * num_gpus
+    optimizer.param_groups[0]["lr"] = float(stage_params[5])
 
     return result
 
@@ -311,7 +308,7 @@ def do_train(cfg,
         best_samples = [[] for _ in range(len(cfg.SOLVER.LAMBDAS))]
         worst_samples = [[] for _ in range(len(cfg.SOLVER.LAMBDAS))]
 
-        stage_params = get_stage_params(cfg, model, optimizer, epoch, args.num_gpus)
+        stage_params = get_stage_params(cfg, model, optimizer, epoch)
 
         total_iterations = 0
         dist.barrier()
