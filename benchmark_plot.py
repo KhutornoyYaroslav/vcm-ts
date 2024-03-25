@@ -50,10 +50,52 @@ def delete_unsupported_annotations(annotations, classes):
             annotation['scores'] = annotation['scores'][mask]
 
 
-def read_dataset(dataset_dir: str,
+def read_object_detection(annotation, device):
+    boxes = []
+    labels = []
+    with open(annotation) as f:
+        for line in f.readlines():
+            elements = list(map(int, line.split()))
+            boxes.append(elements[1:5])
+            labels.append(elements[0])
+    target = dict(
+        boxes=torch.tensor(boxes, dtype=torch.float32, device=device),
+        labels=torch.tensor(labels, dtype=torch.int64, device=device)
+    )
+    return target
+
+
+def read_license_detection(annotation, device):
+    boxes = []
+    with open(annotation) as f:
+        for line in f.readlines():
+            elements = list(map(int, line.split()))
+            boxes.append(elements)
+    target = dict(
+        boxes=torch.tensor(boxes, dtype=torch.float32, device=device)
+    )
+    return target
+
+
+def read_license_recognition(annotation, device):
+    boxes = []
+    texts = []
+    with open(annotation) as f:
+        for line in f.readlines():
+            elements = line.split()
+            boxes.append(list(map(int, elements[1:5])))
+            texts.append(elements[0])
+    target = dict(
+        boxes=torch.tensor(boxes, dtype=torch.float32, device=device),
+        texts=texts
+    )
+    return target
+
+
+def read_dataset(config,
                  device: str):
     dataset = {}
-    metadata = os.path.join(dataset_dir, "metadata.txt")
+    metadata = os.path.join(config["dataset_dir"], "metadata.txt")
     classes = []
     with open(metadata) as f:
         for line in f.readlines():
@@ -61,37 +103,38 @@ def read_dataset(dataset_dir: str,
             classes.append(int(elements[0]))
     dataset['classes'] = classes
 
-    seq_folders = [f for f in os.scandir(dataset_dir) if f.is_dir()]
-    for seq_folder in seq_folders:
-        print(f'Sequence: {seq_folder.name}')
+    sequences = config["sequences"]
+    for sequence in sequences:
+        print(f'Sequence: {sequence["name"]}')
+        sequence_path = os.path.join(config["dataset_dir"], sequence["name"])
         images = []
-        annotations = []
-        images_folder = os.path.join(seq_folder.path, "images")
-        annotations_folder = os.path.join(seq_folder.path, "annotations")
+        annotations = {}
+        images_folder = os.path.join(sequence_path, "images")
         src_reader = PNGReader(images_folder)
         source_images = sorted(glob(os.path.join(images_folder, "*.png")))
-        source_annotations = sorted(glob(os.path.join(annotations_folder, "*.txt")))
-        assert len(source_images) == len(source_annotations)
-        for annotation in tqdm(source_annotations):
-            boxes = []
-            labels = []
-            with open(annotation) as f:
-                for line in f.readlines():
-                    elements = list(map(int, line.split()))
-                    boxes.append(elements[1:5])
-                    labels.append(elements[0])
-            target = dict(
-                boxes=torch.tensor(boxes, dtype=torch.float32, device=device),
-                labels=torch.tensor(labels, dtype=torch.int64, device=device)
-            )
-            annotations.append(target)
+        for annotation_type in sequence["annotation_types"]:
+            annotations[annotation_type] = []
+            annotations_folder = os.path.join(sequence_path, annotation_type)
+            source_annotations = sorted(glob(os.path.join(annotations_folder, "*.txt")))
+            assert len(source_images) == len(source_annotations)
+            for annotation in tqdm(source_annotations):
+                if annotation_type == "object_detection":
+                    target = read_object_detection(annotation, device)
+                elif annotation_type == "license_detection":
+                    target = read_license_detection(annotation, device)
+                elif annotation_type == "license_recognition":
+                    target = read_license_recognition(annotation, device)
+                else:
+                    raise AttributeError("Invalid annotation type in config file")
+                annotations[annotation_type].append(target)
 
+        for _ in tqdm(source_images):
             rgb = src_reader.read_one_frame(src_format="rgb")
             image = np_image_to_tensor(rgb)
             image = image.to(device)
             images.append(image)
 
-        dataset[seq_folder.name] = dict(images=images, annotations=annotations)
+        dataset[sequence["name"]] = dict(images=images, annotations=annotations)
 
     return dataset
 
@@ -133,7 +176,8 @@ def calculate_metrics(dataset,
     metric_ssim = MS_SSIM(data_range=1.0, size_average=False)
 
     dataset_images = dataset[video_name]['images']
-    dataset_annotations = dataset[video_name]['annotations']
+    dataset_annotations = dataset[video_name]['annotations']['object_detection']
+    # TODO: add other annotation types
     mean_ap = {}
     for model in annotations.keys():
         metric_map.update(annotations[model], dataset_annotations)
@@ -174,6 +218,8 @@ def get_metrics(decod_dir: str,
         video_folders = [f for f in os.scandir(model_folder) if f.is_dir()]
 
         for video_folder in video_folders:
+            if "object_detection" not in dataset[video_folder.name]["annotations"].keys():
+                continue
             print(f'\tCalculate metrics for video {video_folder.name}')
             metrics[model_folder.name][video_folder.name] = []
             images_folders = [f for f in os.scandir(video_folder) if f.is_dir()]
@@ -307,38 +353,28 @@ def plot_graphs(metrics, out_path: str, use_ms_ssim: bool):
 
 def main():
     parser = argparse.ArgumentParser(description='Benchmark graph plotting')
-    parser.add_argument('--dataset-dir', dest='dataset_dir', type=str,
-                        default="data/huawei/outputs/benchmark/dataset",
-                        help="Path to dataset directory")
-    parser.add_argument('--decod-dir', dest='decod_dir', type=str,
-                        default="data/huawei/outputs/decod",
-                        help="Path to results directory of decoding stage")
-    parser.add_argument('--device', dest='device', type=str,
-                        default="cuda",
-                        help="Device for tensors")
-    parser.add_argument('--out-path', dest='out_path', type=str,
-                        default="outputs/benchmark",
-                        help="Path to output dir with graphs")
-    parser.add_argument('--ms-ssim', dest='ms_ssim', type=str2bool,
-                        default=False,
-                        help="Plot graphs with MS-SSIM")
+    parser.add_argument('--config', dest='config', type=str,
+                        default="benchmark_config_plot.json",
+                        help="Config for benchmark plot")
     args = parser.parse_args()
 
+    with open(args.config) as f:
+        config = json.load(f)
+
     print('Reading dataset')
-    dataset = read_dataset(args.dataset_dir, 'cpu')  # cpu for optimization video memory
+    dataset = read_dataset(config, 'cpu')  # cpu for optimization video memory
 
     pretrained_weights = torchvision.models.detection.FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1
     rcnn = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=pretrained_weights)
-    rcnn = rcnn.to(args.device)
+    rcnn = rcnn.to(config["device"])
     rcnn.eval()
 
     yolo = YOLO('yolov8n.pt')
-    yolo = yolo.to(args.device)
-    # yolo.eval()
+    yolo = yolo.to(config["device"])
 
-    metrics = get_metrics(args.decod_dir, rcnn, yolo, dataset, args.device, args.ms_ssim)
+    metrics = get_metrics(config["decoded_dir"], rcnn, yolo, dataset, config["device"], config["ms_ssim"])
 
-    plot_graphs(metrics, args.out_path, args.ms_ssim)
+    plot_graphs(metrics, config["out_path"], config["ms_ssim"])
 
 
 if __name__ == "__main__":
