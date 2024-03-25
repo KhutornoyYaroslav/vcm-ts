@@ -174,3 +174,9 @@ cython_debug/
 /configs/*
 !/configs/cfg.yaml.template
 
+# Benchmark
+*.json
+!dataset_config_example.json
+!dataset_config_huawei.json
+!benchmark_config_decoding_template.json
+!benchmark_config_plot_template.json
