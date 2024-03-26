@@ -290,9 +290,6 @@ def do_train(cfg,
         if dist_util.is_main_process():
             print(('\n' + '%12s' * 6 + '%25s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'rank', 'bpp', 'psnr'))
 
-        pbar = enumerate(data_loader)
-        pbar = tqdm(pbar, total=len(data_loader))
-
         # Iteration loop
         stats = {
             'loss_sum': 0,
@@ -312,6 +309,8 @@ def do_train(cfg,
 
         total_iterations = 0
         dist.barrier()
+        pbar = enumerate(data_loader)
+        pbar = tqdm(pbar, total=len(data_loader))
         for iteration, data_entry in pbar:
             global_step = epoch * iters_per_epoch + iteration * args.num_gpus
 

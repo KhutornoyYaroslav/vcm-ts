@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import os
 import time
 
@@ -23,10 +24,12 @@ def init_distributed():
     local_rank = int(os.environ['LOCAL_RANK'])
 
     dist.init_process_group(
-            backend="nccl",
-            init_method=dist_url,
-            world_size=world_size,
-            rank=rank)
+        backend="nccl",
+        init_method=dist_url,
+        timeout=datetime.timedelta(hours=5),
+        world_size=world_size,
+        rank=rank
+    )
 
     # this will make all .cuda() calls work properly
     torch.cuda.set_device(local_rank)
