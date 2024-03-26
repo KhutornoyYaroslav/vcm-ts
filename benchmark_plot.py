@@ -41,6 +41,9 @@ def str2bool(v):
 
 def delete_unsupported_annotations(annotations, classes):
     for key in annotations.keys():
+        if key == "yolo_lp_detection" or len(annotations[key]) == 0:
+            continue
+
         for annotation in annotations[key]:
             mask = torch.ones(annotation['labels'].shape[0], dtype=torch.bool)
             for i in range(annotation['labels'].shape[0]):
@@ -67,12 +70,15 @@ def read_object_detection(annotation, device):
 
 def read_license_detection(annotation, device):
     boxes = []
+    labels = []
     with open(annotation) as f:
         for line in f.readlines():
             elements = list(map(int, line.split()))
             boxes.append(elements)
+            labels.append(0)
     target = dict(
-        boxes=torch.tensor(boxes, dtype=torch.float32, device=device)
+        boxes=torch.tensor(boxes, dtype=torch.float32, device=device),
+        labels=torch.tensor(labels, dtype=torch.int64, device=device)
     )
     return target
 
@@ -148,7 +154,7 @@ def forward_rcnn(rcnn, x):
         return output
 
 
-def forward_yolo(yolo, x):
+def forward_yolo(yolo, x, labels_start_index=1):
     output = {}
     with torch.no_grad():
         pic_height = x.shape[2]
@@ -162,7 +168,7 @@ def forward_yolo(yolo, x):
         )
         result = yolo(x_padded, imgsz=(x_padded.shape[2], x_padded.shape[3]), verbose=False)[0]  # batch = 1
         output['boxes'] = result.boxes.xyxy.cpu()
-        output['labels'] = result.boxes.cls.cpu().type(torch.int64) + 1  # yolo names start from 0
+        output['labels'] = result.boxes.cls.cpu().type(torch.int64) + labels_start_index  # yolo names start from 0
         output['scores'] = result.boxes.conf.cpu()
         return output
 
@@ -176,10 +182,17 @@ def calculate_metrics(dataset,
     metric_ssim = MS_SSIM(data_range=1.0, size_average=False)
 
     dataset_images = dataset[video_name]['images']
-    dataset_annotations = dataset[video_name]['annotations']['object_detection']
-    # TODO: add other annotation types
     mean_ap = {}
     for model in annotations.keys():
+        if len(annotations[model]) == 0:
+            continue
+
+        if model in ['rcnn', 'yolo_detection']:
+            dataset_annotations = dataset[video_name]['annotations']['object_detection']
+        elif model == 'yolo_lp_detection':
+            dataset_annotations = dataset[video_name]['annotations']['license_detection']
+        else:
+            raise RuntimeError("Invalid model type for calculate metrics")
         metric_map.update(annotations[model], dataset_annotations)
         map_metrics = metric_map.compute()
         model_mean_ap = map_metrics['map_50'].item()
@@ -205,7 +218,8 @@ def calculate_metrics(dataset,
 
 def get_metrics(decod_dir: str,
                 rcnn,
-                yolo,
+                yolo_detection,
+                yolo_lp_detection,
                 dataset,
                 device: str,
                 use_ms_ssim: bool):
@@ -218,12 +232,11 @@ def get_metrics(decod_dir: str,
         video_folders = [f for f in os.scandir(model_folder) if f.is_dir()]
 
         for video_folder in video_folders:
-            if "object_detection" not in dataset[video_folder.name]["annotations"].keys():
-                continue
             print(f'\tCalculate metrics for video {video_folder.name}')
             metrics[model_folder.name][video_folder.name] = []
             images_folders = [f for f in os.scandir(video_folder) if f.is_dir()]
             images_folders.sort(key=lambda folder: folder.name)
+            annotation_types = dataset[video_folder.name]["annotations"].keys()
 
             for images_folder in images_folders:
                 info_json = images_folder.path + '.json'
@@ -238,24 +251,32 @@ def get_metrics(decod_dir: str,
                 images = []
                 annotations = {
                     'rcnn': [],
-                    'yolo': []
+                    'yolo_detection': [],
+                    'yolo_lp_detection': []
                 }
                 source_images = sorted(glob(os.path.join(images_folder, "*.png")))
 
-                print(f'\t\tObjects detection')
+                print(f'\t\tObjects detection and recognition')
                 src_reader = PNGReader(images_folder.path)
                 for _ in tqdm(range(len(source_images))):
                     rgb = src_reader.read_one_frame(src_format="rgb")
                     image = np_image_to_tensor(rgb)
                     image = image.to(device)
 
-                    rcnn_output = forward_rcnn(rcnn, image)
-                    yolo_output = forward_yolo(yolo, image)
+                    if "object_detection" in annotation_types:
+                        rcnn_output = forward_rcnn(rcnn, image)
+                        yolo_detection_output = forward_yolo(yolo_detection, image)
+                        annotations['rcnn'].append(rcnn_output)
+                        annotations['yolo_detection'].append(yolo_detection_output)
+                    elif "license_detection" in annotation_types:
+                        yolo_lp_detection_output = forward_yolo(yolo_lp_detection, image, 0)
+                        annotations['yolo_lp_detection'].append(yolo_lp_detection_output)
+                    elif "license_recognition" in annotation_types:
+                        pass
+
                     image = image.cpu()
                     torch.cuda.empty_cache()
                     images.append(image)
-                    annotations['rcnn'].append(rcnn_output)
-                    annotations['yolo'].append(yolo_output)
 
                 delete_unsupported_annotations(annotations, dataset['classes'])
 
@@ -278,10 +299,10 @@ def get_metrics(decod_dir: str,
 def plot_graphs(metrics, out_path: str, use_ms_ssim: bool):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
-    detection_models = sorted(list(metrics[codecs[0]][videos[0]][0]['mean_ap'].keys()))
     os.makedirs(out_path, exist_ok=True)
 
     for video in videos:
+        detection_models = sorted(list(metrics[codecs[0]][video][0]['mean_ap'].keys()))
         for detection_model in detection_models:
             for codec in codecs:
                 bpps = [info['bpp'] for info in metrics[codec][video]]
@@ -369,10 +390,19 @@ def main():
     rcnn = rcnn.to(config["device"])
     rcnn.eval()
 
-    yolo = YOLO('yolov8n.pt')
-    yolo = yolo.to(config["device"])
+    yolo_detection = YOLO('pretrained/yolov8m.pt')
+    yolo_detection = yolo_detection.to(config["device"])
 
-    metrics = get_metrics(config["decoded_dir"], rcnn, yolo, dataset, config["device"], config["ms_ssim"])
+    yolo_lp_detection = YOLO('pretrained/yolov8-lp.pt')
+    yolo_lp_detection = yolo_lp_detection.to(config["device"])
+
+    metrics = get_metrics(config["decoded_dir"],
+                          rcnn,
+                          yolo_detection,
+                          yolo_lp_detection,
+                          dataset,
+                          config["device"],
+                          config["ms_ssim"])
 
     plot_graphs(metrics, config["out_path"], config["ms_ssim"])
 
