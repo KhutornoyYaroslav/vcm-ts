@@ -13,6 +13,7 @@ from torch.utils.data import (
 )
 
 from .datasets import build_dataset
+from .datasets.ObjectDetectionDataset import ObjectDetectionDataset
 
 
 def create_distributed_loader(dataset: Dataset,
@@ -79,5 +80,26 @@ def make_data_loader(cfg, seed: int, is_train: bool = True, is_multi_gpu: bool =
     else:
         data_loader = create_loader(dataset, shuffle, batch_size, cfg.DATA_LOADER.NUM_WORKERS,
                                     cfg.DATA_LOADER.PIN_MEMORY)
+
+    return data_loader
+
+
+def make_object_detection_data_loader(cfg) -> DataLoader:
+    logger = logging.getLogger('CORE')
+
+    cfg_dataset_dirs = cfg.DATASET.TEST_OD_ROOT_DIRS
+
+    # Create datasets
+    datasets = []
+    for root_dir in cfg_dataset_dirs:
+        dataset = ObjectDetectionDataset(root_dir, cfg)
+        logger.info("Loaded dataset from '{0}'. Size: {1}".format(root_dir, len(dataset)))
+        datasets.append(dataset)
+    dataset = ConcatDataset(datasets)
+
+    # Create data loader
+    sampler = SequentialSampler(dataset)
+    data_loader = DataLoader(dataset, num_workers=cfg.DATA_LOADER.NUM_WORKERS,
+                             sampler=sampler, pin_memory=cfg.DATA_LOADER.PIN_MEMORY)
 
     return data_loader

@@ -467,11 +467,28 @@ class DCVC_HEM(nn.Module):
 
         return result
 
+
+    def forward_simple(self,
+                       input: torch.Tensor,
+                       dpb):
+        n, t, c, h, w = input.shape
+        assert self.lambdas.shape[0] == n
+
+        out_dpb = []
+        for i in range(n):
+            output = self.dmc.forward_one_frame(input[i],
+                                                dpb[i],
+                                                self.dmc.mv_y_q_scale[i],
+                                                self.dmc.y_q_scale[i])
+            out_dpb.append(output['dpb'])
+
+        return out_dpb
+
     def forward(self,
                 forward_method: str,
                 input: torch.Tensor,
-                loss_dist_key: str,
-                loss_rate_keys: List[str],
+                loss_dist_key: str = None,
+                loss_rate_keys: List[str] = None,
                 p_frames: int = None,
                 optimizer: torch.optim.Optimizer = None,
                 is_train=True,
@@ -485,3 +502,5 @@ class DCVC_HEM(nn.Module):
             return self.forward_cascade(input, optimizer, loss_dist_key, loss_rate_keys, p_frames, is_train)
         elif forward_method == 'cascade_multi':
             return self.forward_cascade_multi(input, loss_dist_key, loss_rate_keys, dpb, p_frames, t_i)
+        elif forward_method == 'forward_simple':
+            return self.forward_simple(input, dpb)

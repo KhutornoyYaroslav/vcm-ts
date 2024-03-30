@@ -1,24 +1,29 @@
-import os
-import torch
 import logging
+import os
+
 import numpy as np
-from tqdm import tqdm
-from core.utils import dist_util
-from .validation import eval_dataset
-from torchvision.utils import make_grid
-from core.data import make_data_loader
+import torch
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
+
+from core.data import make_data_loader, make_object_detection_data_loader
+from core.utils import dist_util
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
+from .validation import eval_dataset
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
 
     data_loader = make_data_loader(cfg, seed, False)
+    object_detection_loader = None
+    if cfg.DATASET.METADATA_PATH and cfg.DATASET.TEST_OD_ROOT_DIRS:
+        object_detection_loader = make_object_detection_data_loader(cfg)
     model.eval()
-    result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg)
+    result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
+                               object_detection_loader, stage)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -177,7 +182,7 @@ def do_train(cfg,
         arguments["epoch"] = epoch + 1
 
         # Create progress bar
-        print(('\n' + '%12s' * 6 + '%25s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'mse', 'bpp', 'psnr'))
+        print(('\n' + '%9s' * 5 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'bpp', 'psnr'))
 
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
@@ -228,15 +233,14 @@ def do_train(cfg,
             bpp = [f'{x:.2f}' for x in bpp]
             psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
-            s = ('%12s' * 3 + '%12.4g' * 3 + '%25s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
-                                                            ('%g' % (stage_params['stage'] + 1)),
-                                                            mem,
-                                                            optimizer.param_groups[0]["lr"],
-                                                            stats['loss_sum'] / total_iterations,
-                                                            stats['mse_sum'] / total_iterations,
-                                                            ", ".join(bpp),
-                                                            ", ".join(psnr)
-                                                            )
+            s = ('%9s' * 3 + '%9.4g' * 2 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
+                                                          ('%g' % (stage_params['stage'] + 1)),
+                                                          mem,
+                                                          optimizer.param_groups[0]["lr"],
+                                                          stats['loss_sum'] / total_iterations,
+                                                          ", ".join(bpp),
+                                                          ", ".join(psnr)
+                                                          )
             pbar.set_description(s)
 
             add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
@@ -263,17 +267,19 @@ def do_train(cfg,
                                   stage_params['loss_dist_key'],
                                   stage_params['loss_rate_keys'],
                                   stage_params['p_frames'],
-                                  seed)
+                                  seed,
+                                  stage_params['stage'] + 1)
 
-            print(('\n' + 'Evaluation results:' + '%12s' * 2 + '%25s' * 2) % ('loss', 'mse', 'bpp', 'psnr'))
+            print(('\n' + 'Evaluation results:' + '%9s' * 1 + '%37s' * 3) % ('loss', 'bpp', 'psnr', 'mAP'))
             bpp_print = [f'{x:.2f}' for x in result_dict['bpp']]
             psnr = 10 * np.log10(1.0 / (result_dict['psnr']))
             psnr_print = [f'{x:.1f}' for x in psnr]
-            print('                   ' + ('%12.4g' * 2 + '%25s' * 2) %
+            mean_ap_print = [f'{x:.1f}' for x in result_dict['mean_ap']]
+            print('                   ' + ('%9.4g' * 1 + '%37s' * 3) %
                   (result_dict['loss_sum'],
-                   result_dict['mse_sum'],
                    ", ".join(bpp_print),
-                   ", ".join(psnr_print))
+                   ", ".join(psnr_print),
+                   ", ".join(mean_ap_print))
                   )
 
             add_metrics(cfg, summary_writer, result_dict, global_step, is_train=False)
