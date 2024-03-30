@@ -97,6 +97,11 @@ def add_metrics(cfg, summary_writer, result_dict, global_step, is_train: bool = 
     if is_train:
         summary_writer.add_scalar(f'{prefix}_losses/lr', result_dict['lr'], global_step=global_step)
         summary_writer.add_scalar(f'{prefix}_losses/stage', result_dict['stage'], global_step=global_step)
+    else:
+        mean_ap_dict = {}
+        for i, l in enumerate(cfg.SOLVER.LAMBDAS):
+            mean_ap_dict[f"lambda_{i + 1}_{l}"] = result_dict['mean_ap'][i]
+        summary_writer.add_scalars(f'{prefix}_losses/mean_ap', mean_ap_dict, global_step=global_step)
 
     with torch.no_grad():
         # Best samples

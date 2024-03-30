@@ -1,43 +1,54 @@
+import argparse
+import datetime
 import os
 import time
 
 import torch
-import logging
-import argparse
-from core.utils import dist_util
+import torch.distributed as dist
+import torch.multiprocessing as mp
+
 from core.config import cfg as cfg
-from core.engine.train import do_train
 from core.data import make_data_loader
+from core.engine.train_multi import do_train
+from core.utils import dist_util
 from core.utils.logger import setup_logger
-from core.modelling.model import build_model
-from core.utils.checkpoint import CheckPointer
-from core.solver import make_optimizer
+
+
+def init_distributed():
+    # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+    dist_url = "env://" # default
+
+    # only works with torch.distributed.launch // torch.run
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ['WORLD_SIZE'])
+    local_rank = int(os.environ['LOCAL_RANK'])
+
+    dist.init_process_group(
+        backend="nccl",
+        init_method=dist_url,
+        timeout=datetime.timedelta(hours=5),
+        world_size=world_size,
+        rank=rank
+    )
+
+    # this will make all .cuda() calls work properly
+    torch.cuda.set_device(local_rank)
+
+    print(f"Running DDP on rank {rank}.")
+
+    # synchronizes all the threads to reach this point before moving on
+    dist.barrier()
 
 
 def train_model(cfg, args):
-    logger = logging.getLogger('CORE')
-    device = torch.device(cfg.MODEL.DEVICE)
-
-    # Create model
-    model = build_model(cfg)
-    model.to(device)
-
     # Create data loader
-    data_loader = make_data_loader(cfg, args.seed, is_train=True)
+    data_loader = make_data_loader(cfg, args.seed, is_train=True, is_multi_gpu=True)
 
-    # Create optimizer
-    optimizer = make_optimizer(cfg, model)
-    scheduler = None  # no scheduler, lr changes in train function
-
-    # Create checkpointer
     arguments = {"epoch": 0}
-    save_to_disk = dist_util.is_main_process()
-    checkpointer = CheckPointer(model, optimizer, scheduler, cfg.OUTPUT_DIR, save_to_disk, logger)
-    extra_checkpoint_data = checkpointer.load(cfg.MODEL.PRETRAINED_WEIGHTS)
-    arguments.update(extra_checkpoint_data)
 
+    dist.barrier()
     # Train model
-    model = do_train(cfg, model, data_loader, optimizer, scheduler, checkpointer, args.seed, arguments, args)
+    model = do_train(cfg, data_loader, arguments, args)
 
     return model
 
@@ -63,8 +74,8 @@ def main():
                         help="Modify config options using the command-line")
 
     args = parser.parse_args()
-    NUM_GPUS = 1
-    args.distributed = False
+    NUM_GPUS = int(os.environ['WORLD_SIZE'])
+    args.distributed = True
     args.num_gpus = NUM_GPUS
 
     # Enable cudnn auto-tuner to find the best algorithm to use for your hardware.
@@ -78,7 +89,8 @@ def main():
     cfg.freeze()
 
     # Create output directory
-    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+    if dist_util.is_main_process():
+        os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 
     # Create logger
     logger = setup_logger("CORE", dist_util.get_rank(), cfg.OUTPUT_DIR)
@@ -87,12 +99,14 @@ def main():
     logger.info("Loaded configuration file {}".format(args.config_file))
 
     # Create config backup
-    with open(os.path.join(cfg.OUTPUT_DIR, 'cfg.yaml'), "w") as cfg_dump:
-        cfg_dump.write(str(cfg))
+    if dist_util.is_main_process():
+        with open(os.path.join(cfg.OUTPUT_DIR, 'cfg.yaml'), "w") as cfg_dump:
+            cfg_dump.write(str(cfg))
 
     # Train model
     model = train_model(cfg, args)
 
 
 if __name__ == '__main__':
+    init_distributed()
     main()

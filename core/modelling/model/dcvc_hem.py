@@ -1,3 +1,5 @@
+import os
+
 import torch
 from torch import nn
 from typing import List
@@ -9,7 +11,7 @@ class DCVC_HEM(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.dmc = DMC(anchor_num=len(cfg.SOLVER.LAMBDAS))
-        self.lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).to(cfg.MODEL.DEVICE)
+        self.lambdas = torch.FloatTensor(cfg.SOLVER.LAMBDAS).cuda()
         self.lambdas.requires_grad = False
 
         self.inter_modules_dist = [
@@ -206,6 +208,61 @@ class DCVC_HEM(nn.Module):
 
         return result
 
+    def forward_single_multi(self,
+                             input: torch.Tensor,
+                             loss_dist_key: str,
+                             loss_rate_keys: List[str],
+                             dpb):
+        """
+        Implements single stage training strategy (I -> P frames).
+        See: https://arxiv.org/pdf/2111.13850v1.pdf
+
+        Parameters:
+            input : tensor
+                Video sequences data with shape (N, T, C, H, W).
+                N is equal to number of global quantization steps.
+            loss_dist_key: str
+                Loss dist key for output dictionary
+            loss_rate_keys: List[str]
+                Loss rate keys for output dictionary
+            dpb: dict
+                Decoded picture buffer
+        """
+        n, c, h, w = input.shape
+        assert self.lambdas.shape[0] == n
+
+        lambdas = self.lambdas if len(loss_rate_keys) else torch.ones_like(self.lambdas)
+
+        output = self.dmc.forward_one_frame(input,
+                                            dpb,
+                                            self.dmc.mv_y_q_scale,
+                                            self.dmc.y_q_scale)
+        for key in dpb.keys():
+            dpb[key] = output['dpb'][key].detach()
+
+        # Calculate loss
+        rate = torch.zeros_like(self.lambdas)
+        for key in loss_rate_keys:
+            assert key in output
+            rate += output[key]
+
+        assert loss_dist_key in output
+        dist = output[loss_dist_key]
+
+        loss = rate + dist * lambdas
+        loss_to_opt = torch.mean(loss)  # (N) -> (1)
+        result = {
+            "rate": rate,  # (N)
+            "dist": dist,  # (N)
+            "loss": loss,  # (N)
+            "loss_to_opt": loss_to_opt,  # (1)
+            "input_seqs": input,  # (N, p_frame)
+            "decod_seqs": dpb["ref_frame"],  # (N, p_frame)
+            "dpb": dpb
+        }
+
+        return result
+
     def forward_cascade(self,
                         input: torch.Tensor,
                         optimizer: torch.optim.Optimizer,
@@ -324,3 +381,126 @@ class DCVC_HEM(nn.Module):
         result['decod_seqs'] = result['decod_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
 
         return result
+
+    def forward_cascade_multi(self,
+                              input: torch.Tensor,
+                              loss_dist_key: str,
+                              loss_rate_keys: List[str],
+                              dpb,
+                              p_frames: int,
+                              t_i: int):
+        """
+        Implements cascaded loss training strategy (avg loss).
+        See: https://arxiv.org/pdf/2111.13850v1.pdf
+
+        Parameters:
+            input : tensor
+                Video sequences data with shape (N, T, C, H, W).
+                N is equal to number of global quantization steps.
+            loss_dist_key: str
+                Loss dist key for output dictionary
+            loss_rate_keys: List[str]
+                Loss rate keys for output dictionary
+            dpb: dict
+                Decoded picture buffer
+            p_frames: int
+                Number of p-frames
+            t_i: int
+                Subsequence index
+        """
+        n, t, c, h, w = input.shape
+        assert self.lambdas.shape[0] == n
+
+        lambdas = self.lambdas if len(loss_rate_keys) else torch.ones_like(self.lambdas)
+
+        input_seqs = []
+        decod_seqs = []
+        input_seqs.append(input[:, t_i])
+        decod_seqs.append(input[:, t_i])
+
+        rate_list = []
+        dist_list = []
+        loss_list = []
+
+        # Forward P-frames
+        for p_idx in range(0, p_frames):
+            output = self.dmc.forward_one_frame(input[:, t_i + 1 + p_idx],
+                                                dpb,
+                                                self.dmc.mv_y_q_scale,
+                                                self.dmc.y_q_scale)
+            dpb = output['dpb']
+
+            # Calculate loss
+            rate = torch.zeros_like(self.lambdas)
+            for key in loss_rate_keys:
+                assert key in output
+                rate += output[key]
+
+            assert loss_dist_key in output
+            dist = output[loss_dist_key]
+
+            rate_list.append(rate)
+            dist_list.append(dist)
+            loss_list.append(rate + dist * lambdas)
+            input_seqs.append(input[:, t_i + 1 + p_idx])
+            decod_seqs.append(dpb["ref_frame"])
+
+        rate = torch.stack(rate_list, -1)  # (N, p_frames)
+        rate = torch.mean(rate, -1)  # (N, p_frames) -> (N)
+
+        dist = torch.stack(dist_list, -1)  # (N, p_frames)
+        dist = torch.mean(dist, -1)  # (N, p_frames) -> (N)
+
+        loss = torch.stack(loss_list, -1)  # (N, p_frames)
+        loss = torch.mean(loss, -1)  # (N, p_frames) -> (N)
+        loss_to_opt = torch.mean(loss, -1)  # (N) -> (1)
+
+        result = {
+            "rate": rate,  # (N)
+            "dist": dist,  # (N)
+            "loss": loss,  # (N)
+            "loss_to_opt": loss_to_opt,  # (1)
+            "input_seqs": torch.stack(input_seqs, -1),  # (N, p_frames + 1)
+            "decod_seqs": torch.stack(decod_seqs, -1),  # (N, p_frames + 1)
+            "dpb": dpb
+        }
+
+        return result
+
+
+    def forward_simple(self,
+                       input: torch.Tensor,
+                       dpb):
+        n, t, c, h, w = input.shape
+        assert self.lambdas.shape[0] == n
+
+        out_dpb = []
+        for i in range(n):
+            output = self.dmc.forward_one_frame(input[i],
+                                                dpb[i],
+                                                self.dmc.mv_y_q_scale[i],
+                                                self.dmc.y_q_scale[i])
+            out_dpb.append(output['dpb'])
+
+        return out_dpb
+
+    def forward(self,
+                forward_method: str,
+                input: torch.Tensor,
+                loss_dist_key: str = None,
+                loss_rate_keys: List[str] = None,
+                p_frames: int = None,
+                optimizer: torch.optim.Optimizer = None,
+                is_train=True,
+                dpb=None,
+                t_i=None):
+        if forward_method == 'single':
+            return self.forward_single(input, optimizer, loss_dist_key, loss_rate_keys, p_frames, is_train)
+        elif forward_method == 'single_multi':
+            return self.forward_single_multi(input, loss_dist_key, loss_rate_keys, dpb)
+        elif forward_method == 'cascade':
+            return self.forward_cascade(input, optimizer, loss_dist_key, loss_rate_keys, p_frames, is_train)
+        elif forward_method == 'cascade_multi':
+            return self.forward_cascade_multi(input, loss_dist_key, loss_rate_keys, dpb, p_frames, t_i)
+        elif forward_method == 'forward_simple':
+            return self.forward_simple(input, dpb)
