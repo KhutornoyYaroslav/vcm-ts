@@ -139,7 +139,7 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
                     torch.cuda.empty_cache()
 
         delete_unsupported_annotations(output_annotations, classes)
-        metric_map = MeanAveragePrecision()
+        metric_map = MeanAveragePrecision(compute_on_cpu=True, sync_on_compute=False, distributed_available_fn=None)
         for i in range(n):
             metric_map.update(output_annotations[i], source_annotations[i])
             map_metrics = metric_map.compute()
