@@ -54,6 +54,7 @@ def get_stage_params(cfg,
         4 - loss rate
         5 - lr
         6 - epochs
+        7 - perceptual loss model
 
     Parameters:
         cfg : config
@@ -189,7 +190,8 @@ def do_train(cfg,
         arguments["epoch"] = epoch + 1
 
         # Create progress bar
-        print(('\n' + '%9s' * 6 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'perc_loss', 'bpp', 'psnr'))
+        print(('\n' + '%10s' * 7 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'dist', 'p_dist',
+                                                  'bpp', 'psnr'))
 
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
@@ -197,9 +199,9 @@ def do_train(cfg,
         # Iteration loop
         stats = {
             'loss_sum': 0,
-            'perceptual_loss': 0,
+            'dist': 0,
+            'p_dist': 0,
             'bpp': 0,
-            'mse_sum': 0,
             'psnr': 0,
             'lr': 0.0,
             'stage': 0,
@@ -232,9 +234,9 @@ def do_train(cfg,
 
             # Update stats
             stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (N, T-1) -> (1)
-            stats['perceptual_loss'] += torch.sum(torch.mean(outputs['perceptual_loss'], -1)).item()  # (N, T-1) -> (1)
+            stats['dist'] += torch.mean(torch.sum(outputs['dist'], -1)).item()  # (N, T-1) -> (1)
+            stats['p_dist'] += torch.mean(torch.sum(outputs['p_dist'], -1)).item()  # (N, T-1) -> (1)
             stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
-            stats['mse_sum'] += 0  # TODO:
             stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
 
             # Update progress bar
@@ -243,23 +245,24 @@ def do_train(cfg,
             bpp = [f'{x:.2f}' for x in bpp]
             psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
-            s = ('%9s' * 3 + '%9.4g' * 3 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
-                                                          ('%g' % (stage_params['stage'] + 1)),
-                                                          mem,
-                                                          optimizer.param_groups[0]["lr"],
-                                                          stats['loss_sum'] / total_iterations,
-                                                          stats['perceptual_loss'] / total_iterations,
-                                                          ", ".join(bpp),
-                                                          ", ".join(psnr)
-                                                          )
+            s = ('%10s' * 3 + '%10.4g' * 4 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
+                                                            ('%g' % (stage_params['stage'] + 1)),
+                                                            mem,
+                                                            optimizer.param_groups[0]["lr"],
+                                                            stats['loss_sum'] / total_iterations,
+                                                            stats['dist'] / total_iterations,
+                                                            stats['p_dist'] / total_iterations,
+                                                            ", ".join(bpp),
+                                                            ", ".join(psnr)
+                                                            )
             pbar.set_description(s)
 
             add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
 
         stats['loss_sum'] /= total_iterations
-        stats['perceptual_loss'] /= total_iterations
+        stats['dist'] /= total_iterations
+        stats['p_dist'] /= total_iterations
         stats['bpp'] /= total_iterations
-        stats['mse_sum'] /= total_iterations
         stats['psnr'] /= total_iterations
         stats['lr'] = optimizer.param_groups[0]["lr"]
         stats['stage'] = stage_params['stage'] + 1
@@ -283,14 +286,16 @@ def do_train(cfg,
                                   stage_params['stage'] + 1,
                                   stage_params['perceptual_loss'])
 
-            print(('\n' + 'Evaluation results:' + '%9s' * 2 + '%37s' * 3) % ('loss', 'perc_loss', 'bpp', 'psnr', 'mAP'))
+            print(('\n' + 'Evaluation results:' + '%10s' * 3 + '%37s' * 3) % ('loss', 'dist', 'p_dist', 'bpp', 'psnr',
+                                                                              'mAP'))
             bpp_print = [f'{x:.2f}' for x in result_dict['bpp']]
             psnr = 10 * np.log10(1.0 / (result_dict['psnr']))
             psnr_print = [f'{x:.1f}' for x in psnr]
             mean_ap_print = [f'{x:.1f}' for x in result_dict['mean_ap']]
-            print('                   ' + ('%9.4g' * 2 + '%37s' * 3) %
+            print('                   ' + ('%10.4g' * 3 + '%37s' * 3) %
                   (result_dict['loss_sum'],
-                   result_dict['perceptual_loss'],
+                   result_dict['dist'],
+                   result_dict['p_dist'],
                    ", ".join(bpp_print),
                    ", ".join(psnr_print),
                    ", ".join(mean_ap_print))
