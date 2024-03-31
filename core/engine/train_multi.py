@@ -120,7 +120,7 @@ def get_stage_params(cfg,
         raise SystemError('Invalid pair of part and loss rate')
     # modules for perceptual loss is always eval
     model.module.dmc.vgg.eval()
-    model.module.dmc.rcnn.eval()
+    # model.module.dmc.rcnn.eval()
 
     # Train method
     if stage_params[2] == 'single_multi':
