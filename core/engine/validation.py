@@ -52,14 +52,15 @@ def delete_unsupported_annotations(annotations, classes):
 
 
 def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                 object_detection_loader=None, stage=0):
+                 object_detection_loader=None, stage=0, perceptual_loss_key=None):
     logger = logging.getLogger("CORE.inference")
 
     # Iteration loop
     stats = {
         'loss_sum': 0,
+        'dist': 0,
+        'p_dist': 0,
         'bpp': 0,
-        'mse_sum': 0,
         'psnr': 0,
         'mean_ap': [],
         'best_samples': [],
@@ -84,11 +85,13 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
                             loss_dist_key,
                             loss_rate_keys,
                             p_frames=p_frames,
+                            perceptual_loss_key=perceptual_loss_key,
                             is_train=False)
 
         stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (T-1) -> (1)
+        stats['dist'] += torch.mean(torch.sum(outputs['dist'], -1)).item()  # (T-1) -> (1)
+        stats['p_dist'] += torch.mean(torch.sum(outputs['p_dist'], -1)).item()  # (T-1) -> (1)
         stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
-        stats['mse_sum'] += 0  # TODO:
         stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
         sample_count += outputs['single_forwards']
 
@@ -148,8 +151,9 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
 
     # Return results
     stats['loss_sum'] /= sample_count
+    stats['dist'] /= sample_count
+    stats['p_dist'] /= sample_count
     stats['bpp'] /= sample_count
-    stats['mse_sum'] /= sample_count
     stats['psnr'] /= sample_count
     stats['best_samples'] = best_samples
     stats['worst_samples'] = worst_samples

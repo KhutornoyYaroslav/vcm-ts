@@ -16,7 +16,7 @@ from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
 from .validation import eval_dataset
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss_key):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
@@ -27,7 +27,7 @@ def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
     data_loader = make_data_loader(cfg, seed, False, True)
     model.eval()
     result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                               object_detection_loader, stage)
+                               object_detection_loader, stage, perceptual_loss_key)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -35,7 +35,7 @@ def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
 
 def calc_max_epoch(cfg):
     for stage_params in cfg.SOLVER.STAGES:
-        assert len(stage_params) == 7
+        assert len(stage_params) == 8
 
     epoch_counter = 0
     for i in range(len(cfg.SOLVER.STAGES)):
@@ -66,6 +66,7 @@ def get_stage_params(cfg,
         4 - loss rate
         5 - lr
         6 - epochs
+        7 - perceptual loss model
 
     Parameters:
         cfg : config
@@ -87,12 +88,13 @@ def get_stage_params(cfg,
         'p_frames': None,
         'forward_method': None,
         'loss_dist_key': None,
-        'loss_rate_keys': None
+        'loss_rate_keys': None,
+        'perceptual_loss': None
     }
 
     # Check number of stage parameters
     for stage_params in cfg.SOLVER.STAGES:
-        assert len(stage_params) == 7
+        assert len(stage_params) == 8
 
     # Get current stage
     result['stage'] = get_current_stage(cfg, epoch)
@@ -116,6 +118,9 @@ def get_stage_params(cfg,
         model.module.activate_modules_all()
     else:
         raise SystemError('Invalid pair of part and loss rate')
+    # modules for perceptual loss is always eval
+    model.module.dmc.vgg.eval()
+    # model.module.dmc.rcnn.eval()
 
     # Train method
     if stage_params[2] == 'single_multi':
@@ -147,6 +152,9 @@ def get_stage_params(cfg,
 
     # Learning rate
     optimizer.param_groups[0]["lr"] = float(stage_params[5])
+
+    # Perceptual loss
+    result['perceptual_loss'] = stage_params[7]
 
     return result
 
@@ -194,6 +202,7 @@ def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
                        input[:, t_i + 1 + p_idx],
                        stage_params['loss_dist_key'],
                        stage_params['loss_rate_keys'],
+                       perceptual_loss_key=stage_params['perceptual_loss'],
                        dpb=dpb)
         loss_to_opt = result['loss_to_opt']
         loss_to_opt.backward()
@@ -208,6 +217,7 @@ def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
 
         outputs['rate'].append(result['rate'])  # (N)
         outputs['dist'].append(result['dist'])  # (N)
+        outputs['p_dist'].append(result['p_dist'])  # (N)
         outputs['loss'].append(result['loss'])  # (N)
         outputs['single_forwards'] += 1
         input_seqs.append(result['input_seqs'])
@@ -227,6 +237,7 @@ def cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
                    input,
                    stage_params['loss_dist_key'],
                    stage_params['loss_rate_keys'],
+                   perceptual_loss_key=stage_params['perceptual_loss'],
                    dpb=dpb,
                    p_frames=stage_params['p_frames'],
                    t_i=t_i)
@@ -239,6 +250,7 @@ def cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
 
     outputs['rate'].append(result['rate'])  # (N)
     outputs['dist'].append(result['dist'])  # (N)
+    outputs['p_dist'].append(result['p_dist'])  # (N)
     outputs['loss'].append(result['loss'])  # (N)
     outputs['loss_seq'].append(result['loss'])  # (N)
     outputs['single_forwards'] += 1
@@ -292,13 +304,15 @@ def do_train(cfg,
 
         # Create progress bar
         if dist_util.is_main_process():
-            print(('\n' + '%9s' * 6 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'rank', 'bpp', 'psnr'))
+            print(('\n' + '%10s' * 8 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'rank',
+                                                      'dist', 'p_dist', 'bpp', 'psnr'))
 
         # Iteration loop
         stats = {
             'loss_sum': 0,
+            'dist': 0,
+            'p_dist': 0,
             'bpp': 0,
-            'mse_sum': 0,
             'psnr': 0,
             'lr': 0.0,
             'stage': 0,
@@ -342,6 +356,7 @@ def do_train(cfg,
             outputs = {
                 'rate': [],  # (N, (T - p_frames) * p_frames or T - p_frames)
                 'dist': [],  # (N, (T - p_frames) * p_frames or T - p_frames)
+                'p_dist': [],  # (N, (T - p_frames) * p_frames or T - p_frames)
                 'loss': [],  # (N, (T - p_frames) * p_frames or T - p_frames)
                 'loss_seq': [],  # (N, T - p_frames)
                 'input_seqs': [],  # (N, T - p_frames, p_frames + 1, C, H, W)
@@ -365,6 +380,7 @@ def do_train(cfg,
 
             outputs['rate'] = torch.stack(outputs['rate'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
             outputs['dist'] = torch.stack(outputs['dist'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
+            outputs['p_dist'] = torch.stack(outputs['p_dist'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
             outputs['loss'] = torch.stack(outputs['loss'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
             outputs['loss_seq'] = torch.stack(outputs['loss_seq'], -1)  # (N, T - p_frames)
             outputs['input_seqs'] = torch.stack(outputs['input_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
@@ -376,8 +392,9 @@ def do_train(cfg,
 
             # Update stats
             stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (T-1) -> (1)
+            stats['dist'] += torch.mean(torch.sum(outputs['dist'], -1)).item()  # (N, T-1) -> (1)
+            stats['p_dist'] += torch.mean(torch.sum(outputs['p_dist'], -1)).item()  # (N, T-1) -> (1)
             stats['bpp'] += torch.sum(outputs['rate'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
-            stats['mse_sum'] += 0  # TODO:
             stats['psnr'] += torch.sum(outputs['dist'], -1).cpu().detach().numpy()  # (N, T-1) -> (N)
 
             # Update progress bar
@@ -386,15 +403,17 @@ def do_train(cfg,
             bpp = [f'{x:.2f}' for x in bpp]
             psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
-            s = ('%9s' * 3 + '%9.4g' * 3 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
-                                                          ('%g' % (stage_params['stage'] + 1)),
-                                                          mem,
-                                                          optimizer.param_groups[0]["lr"],
-                                                          stats['loss_sum'] / total_iterations,
-                                                          rank,
-                                                          ", ".join(bpp),
-                                                          ", ".join(psnr)
-                                                          )
+            s = ('%10s' * 3 + '%10.4g' * 5 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
+                                                            ('%g' % (stage_params['stage'] + 1)),
+                                                            mem,
+                                                            optimizer.param_groups[0]["lr"],
+                                                            stats['loss_sum'] / total_iterations,
+                                                            rank,
+                                                            stats['dist'] / total_iterations,
+                                                            stats['p_dist'] / total_iterations,
+                                                            ", ".join(bpp),
+                                                            ", ".join(psnr)
+                                                            )
             pbar.set_description(s)
 
             if dist_util.is_main_process():
@@ -403,6 +422,8 @@ def do_train(cfg,
         # Receive metrics from gpus
         iterations = [None for _ in range(args.num_gpus)]
         loss_sum = [None for _ in range(args.num_gpus)]
+        distortion = [None for _ in range(args.num_gpus)]
+        p_distortion = [None for _ in range(args.num_gpus)]
         bpp = [None for _ in range(args.num_gpus)]
         psnr = [None for _ in range(args.num_gpus)]
 
@@ -414,6 +435,16 @@ def do_train(cfg,
         dist.gather_object(
             stats['loss_sum'],
             loss_sum if dist_util.is_main_process() else None,
+            dst=0
+        )
+        dist.gather_object(
+            stats['dist'],
+            distortion if dist_util.is_main_process() else None,
+            dst=0
+        )
+        dist.gather_object(
+            stats['p_dist'],
+            p_distortion if dist_util.is_main_process() else None,
             dst=0
         )
         dist.gather_object(
@@ -430,12 +461,15 @@ def do_train(cfg,
         if dist_util.is_main_process():
             total_iterations = sum(iterations)
             stats['loss_sum'] = sum(loss_sum)
+            stats['dist'] = sum(distortion)
+            stats['p_dist'] = sum(p_distortion)
             stats['bpp'] = np.sum(bpp, axis=0)
             stats['psnr'] = np.sum(psnr, axis=0)
 
             stats['loss_sum'] /= total_iterations
+            stats['dist'] /= total_iterations
+            stats['p_dist'] /= total_iterations
             stats['bpp'] /= total_iterations
-            stats['mse_sum'] /= total_iterations
             stats['psnr'] /= total_iterations
             stats['lr'] = optimizer.param_groups[0]["lr"]
             stats['stage'] = stage_params['stage'] + 1
@@ -454,15 +488,19 @@ def do_train(cfg,
                                   stage_params['loss_rate_keys'],
                                   stage_params['p_frames'],
                                   args.seed,
-                                  stage_params['stage'] + 1)
+                                  stage_params['stage'] + 1,
+                                  stage_params['perceptual_loss'])
 
-            print(('\n' + 'Evaluation results:' + '%9s' * 1 + '%37s' * 3) % ('loss', 'bpp', 'psnr', 'mAP'))
+            print(('\n' + 'Evaluation results:' + '%10s' * 3 + '%37s' * 3) % ('loss', 'dist', 'p_dist', 'bpp', 'psnr',
+                                                                              'mAP'))
             bpp_print = [f'{x:.2f}' for x in result_dict['bpp']]
             psnr = 10 * np.log10(1.0 / (result_dict['psnr']))
             psnr_print = [f'{x:.1f}' for x in psnr]
             mean_ap_print = [f'{x:.1f}' for x in result_dict['mean_ap']]
-            print('                   ' + ('%9.4g' * 1 + '%37s' * 3) %
+            print('                   ' + ('%10.4g' * 3 + '%37s' * 3) %
                   (result_dict['loss_sum'],
+                   result_dict['dist'],
+                   result_dict['p_dist'],
                    ", ".join(bpp_print),
                    ", ".join(psnr_print),
                    ", ".join(mean_ap_print))

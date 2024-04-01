@@ -4,7 +4,7 @@
 import torch
 from torch import nn
 
-from src.layers.layers import conv3x3
+from DCVC_HEM.src.layers.layers import conv3x3
 
 from .common_model import CompressionModel
 from .video_net import LowerBound, UNet, get_enc_dec_models, get_hyper_enc_dec_models
