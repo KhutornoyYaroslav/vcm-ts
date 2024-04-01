@@ -175,6 +175,11 @@ def init_model(cfg, logger, arguments):
     extra_checkpoint_data = checkpointer.load(cfg.MODEL.PRETRAINED_WEIGHTS)
     arguments.update(extra_checkpoint_data)
 
+    model.module.dmc.rcnn.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
+    for p in model.module.dmc.rcnn.model.parameters():
+        p.requires_grad = False
+    model.module.dmc.rcnn.model.eval()
+
     return model, optimizer, checkpointer
 
 
