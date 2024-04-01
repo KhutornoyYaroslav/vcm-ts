@@ -177,8 +177,8 @@ class DCVC_HEM(nn.Module):
 
                 if perceptual_loss_key == 'vgg':
                     perceptual_dist = output['vgg_loss']
-                # elif perceptual_loss_key == 'rcnn':
-                #     perceptual_dist = output['rcnn_loss']
+                elif perceptual_loss_key == 'rcnn':
+                    perceptual_dist = output['rcnn_loss']
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -265,8 +265,8 @@ class DCVC_HEM(nn.Module):
 
         if perceptual_loss_key == 'vgg':
             perceptual_dist = output['vgg_loss']
-        # elif perceptual_loss_key == 'rcnn':
-        #     perceptual_dist = output['rcnn_loss']
+        elif perceptual_loss_key == 'rcnn':
+            perceptual_dist = output['rcnn_loss']
         else:
             perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -368,8 +368,8 @@ class DCVC_HEM(nn.Module):
 
                 if perceptual_loss_key == 'vgg':
                     perceptual_dist = output['vgg_loss']
-                # elif perceptual_loss_key == 'rcnn':
-                #     perceptual_dist = output['rcnn_loss']
+                elif perceptual_loss_key == 'rcnn':
+                    perceptual_dist = output['rcnn_loss']
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -482,8 +482,8 @@ class DCVC_HEM(nn.Module):
 
             if perceptual_loss_key == 'vgg':
                 perceptual_dist = output['vgg_loss']
-            # elif perceptual_loss_key == 'rcnn':
-            #     perceptual_dist = output['rcnn_loss']
+            elif perceptual_loss_key == 'rcnn':
+                perceptual_dist = output['rcnn_loss']
             else:
                 perceptual_dist = torch.zeros_like(self.lambdas)
 

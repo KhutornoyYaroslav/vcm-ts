@@ -119,8 +119,8 @@ def get_stage_params(cfg,
     else:
         raise SystemError('Invalid pair of part and loss rate')
     # modules for perceptual loss is always eval
-    model.module.dmc.vgg.eval()
-    # model.module.dmc.rcnn.eval()
+    # model.module.dmc.vgg.eval()
+    model.module.dmc.rcnn.eval()
 
     # Train method
     if stage_params[2] == 'single_multi':
@@ -304,7 +304,7 @@ def do_train(cfg,
 
         # Create progress bar
         if dist_util.is_main_process():
-            print(('\n' + '%10s' * 8 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'rank',
+            print(('\n' + '%10s' * 7 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'loss', 'rank',
                                                       'dist', 'p_dist', 'bpp', 'psnr'))
 
         # Iteration loop
@@ -403,10 +403,9 @@ def do_train(cfg,
             bpp = [f'{x:.2f}' for x in bpp]
             psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
-            s = ('%10s' * 3 + '%10.4g' * 5 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
+            s = ('%10s' * 3 + '%10.4g' * 4 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
                                                             ('%g' % (stage_params['stage'] + 1)),
                                                             mem,
-                                                            optimizer.param_groups[0]["lr"],
                                                             stats['loss_sum'] / total_iterations,
                                                             rank,
                                                             stats['dist'] / total_iterations,

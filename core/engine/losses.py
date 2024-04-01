@@ -1,5 +1,6 @@
 import torch
 import torchvision
+from torchvision.models import resnet50, ResNet50_Weights
 from torchvision.models.feature_extraction import create_feature_extractor
 
 
@@ -39,17 +40,17 @@ class VGGPerceptualLoss(torch.nn.Module):
             x = block(x)
             y = block(y)
             if i in feature_layers:
-                loss_ = torch.nn.functional.l1_loss(x, y, reduction='none')
+                loss_ = torch.nn.functional.mse_loss(x, y, reduction='none')
                 loss += torch.mean(loss_, dim=(1, 2, 3))
-        return loss # (N)
+        return loss  # (N)
 
 
 class FasterRCNNPerceptualLoss(torch.nn.Module):
     def __init__(self):
         super(FasterRCNNPerceptualLoss, self).__init__()
         # Create model
-        self.pretrained_weights = torchvision.models.detection.FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1
-        self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=self.pretrained_weights)
+        self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
+        self.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
         # Get features
         self.return_nodes = {
             'body.layer1': 'x4',
@@ -70,10 +71,10 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
             f_target = self.features.forward(target)
 
         # Calculate loss
-        # TODO: reduce mean only by (1, 2, 3) dimensions
         loss = 0.0
         for key in f_input.keys():
             if key in feature_layers:
-                loss += torch.nn.functional.l1_loss(f_input[key], f_target[key])
+                loss_ = torch.nn.functional.mse_loss(f_input[key], f_target[key], reduction='none')
+                loss += torch.mean(loss_, dim=(1, 2, 3))
 
         return loss
