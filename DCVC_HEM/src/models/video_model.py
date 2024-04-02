@@ -542,8 +542,6 @@ class DMC(CompressionModel):
         me_mse = self.mse(x, warp_frame)
         mse = torch.sum(mse, dim=(1, 2, 3)) / pixel_num
         me_mse = torch.sum(me_mse, dim=(1, 2, 3)) / pixel_num
-        # vgg_loss = self.vgg(x, recon_image)
-        rcnn_loss = self.rcnn(x, recon_image)
 
         if self.training:
             y_for_bit = self.add_noise(y_res)
@@ -579,8 +577,6 @@ class DMC(CompressionModel):
                 "bpp": bpp,
                 "me_mse": me_mse,
                 "mse": mse,
-                # "vgg_loss": vgg_loss,
-                "rcnn_loss": rcnn_loss,
                 # "ssim": ssim,
                 "dpb": {
                     "ref_frame": recon_image,

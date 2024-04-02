@@ -1,8 +1,8 @@
-import os
+from typing import List
 
 import torch
 from torch import nn
-from typing import List
+
 from DCVC_HEM.src.models.video_model import DMC
 
 
@@ -103,7 +103,7 @@ class DCVC_HEM(nn.Module):
                        loss_dist_key: str,
                        loss_rate_keys: List[str],
                        p_frames: int,
-                       perceptual_loss_key: str,
+                       perceptual_loss: nn.Module,
                        is_train=True):
         """
         Implements single stage training strategy (I -> P frames).
@@ -121,6 +121,8 @@ class DCVC_HEM(nn.Module):
                 Loss rate keys for output dictionary
             p_frames: int
                 Number of p-frames
+            perceptual_loss: nn.Module
+                Perceptual loss model
             is_train: bool
                 Train or eval mode
         """
@@ -175,10 +177,8 @@ class DCVC_HEM(nn.Module):
                 assert loss_dist_key in output
                 dist = output[loss_dist_key]
 
-                if perceptual_loss_key == 'vgg':
-                    perceptual_dist = output['vgg_loss']
-                elif perceptual_loss_key == 'rcnn':
-                    perceptual_dist = output['rcnn_loss']
+                if perceptual_loss is not None:
+                    perceptual_dist = perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -226,7 +226,7 @@ class DCVC_HEM(nn.Module):
                              loss_dist_key: str,
                              loss_rate_keys: List[str],
                              dpb,
-                             perceptual_loss_key: str):
+                             perceptual_loss: nn.Module):
         """
         Implements single stage training strategy (I -> P frames).
         See: https://arxiv.org/pdf/2111.13850v1.pdf
@@ -241,6 +241,8 @@ class DCVC_HEM(nn.Module):
                 Loss rate keys for output dictionary
             dpb: dict
                 Decoded picture buffer
+            perceptual_loss: nn.Module
+                Perceptual loss model
         """
         n, c, h, w = input.shape
         assert self.lambdas.shape[0] == n
@@ -263,10 +265,8 @@ class DCVC_HEM(nn.Module):
         assert loss_dist_key in output
         dist = output[loss_dist_key]
 
-        if perceptual_loss_key == 'vgg':
-            perceptual_dist = output['vgg_loss']
-        elif perceptual_loss_key == 'rcnn':
-            perceptual_dist = output['rcnn_loss']
+        if perceptual_loss is not None:
+            perceptual_dist = perceptual_loss(input, output['dpb']['ref_frame'])
         else:
             perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -292,7 +292,7 @@ class DCVC_HEM(nn.Module):
                         loss_dist_key: str,
                         loss_rate_keys: List[str],
                         p_frames: int,
-                        perceptual_loss_key: str,
+                        perceptual_loss: nn.Module,
                         is_train=True):
         """
         Implements cascaded loss training strategy (avg loss).
@@ -310,6 +310,8 @@ class DCVC_HEM(nn.Module):
                 Loss rate keys for output dictionary
             p_frames: int
                 Number of p-frames
+            perceptual_loss: nn.Module
+                Perceptual loss model
             is_train: bool
                 Train or eval mode
         """
@@ -366,10 +368,8 @@ class DCVC_HEM(nn.Module):
                 assert loss_dist_key in output
                 dist = output[loss_dist_key]
 
-                if perceptual_loss_key == 'vgg':
-                    perceptual_dist = output['vgg_loss']
-                elif perceptual_loss_key == 'rcnn':
-                    perceptual_dist = output['rcnn_loss']
+                if perceptual_loss is not None:
+                    perceptual_dist = perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -428,7 +428,7 @@ class DCVC_HEM(nn.Module):
                               dpb,
                               p_frames: int,
                               t_i: int,
-                              perceptual_loss_key: str):
+                              perceptual_loss: nn.Module):
         """
         Implements cascaded loss training strategy (avg loss).
         See: https://arxiv.org/pdf/2111.13850v1.pdf
@@ -447,6 +447,8 @@ class DCVC_HEM(nn.Module):
                 Number of p-frames
             t_i: int
                 Subsequence index
+            perceptual_loss: nn.Module
+                Perceptual loss model
         """
         n, t, c, h, w = input.shape
         assert self.lambdas.shape[0] == n
@@ -480,10 +482,8 @@ class DCVC_HEM(nn.Module):
             assert loss_dist_key in output
             dist = output[loss_dist_key]
 
-            if perceptual_loss_key == 'vgg':
-                perceptual_dist = output['vgg_loss']
-            elif perceptual_loss_key == 'rcnn':
-                perceptual_dist = output['rcnn_loss']
+            if perceptual_loss is not None:
+                perceptual_dist = perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
             else:
                 perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -543,21 +543,21 @@ class DCVC_HEM(nn.Module):
                 loss_dist_key: str = None,
                 loss_rate_keys: List[str] = None,
                 p_frames: int = None,
-                perceptual_loss_key: str = None,
+                perceptual_loss: nn.Module = None,
                 optimizer: torch.optim.Optimizer = None,
                 is_train=True,
                 dpb=None,
                 t_i=None):
         if forward_method == 'single':
             return self.forward_single(input, optimizer, loss_dist_key, loss_rate_keys, p_frames,
-                                       perceptual_loss_key, is_train)
+                                       perceptual_loss, is_train)
         elif forward_method == 'single_multi':
-            return self.forward_single_multi(input, loss_dist_key, loss_rate_keys, dpb, perceptual_loss_key)
+            return self.forward_single_multi(input, loss_dist_key, loss_rate_keys, dpb, perceptual_loss)
         elif forward_method == 'cascade':
             return self.forward_cascade(input, optimizer, loss_dist_key, loss_rate_keys, p_frames,
-                                        perceptual_loss_key, is_train)
+                                        perceptual_loss, is_train)
         elif forward_method == 'cascade_multi':
             return self.forward_cascade_multi(input, loss_dist_key, loss_rate_keys, dpb, p_frames, t_i,
-                                              perceptual_loss_key)
+                                              perceptual_loss)
         elif forward_method == 'forward_simple':
             return self.forward_simple(input, dpb)

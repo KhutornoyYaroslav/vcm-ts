@@ -13,10 +13,11 @@ from core.solver import make_optimizer
 from core.utils import dist_util
 from core.utils.checkpoint import CheckPointer
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
+from .losses import VGGPerceptualLoss, FasterRCNNPerceptualLoss
 from .validation import eval_dataset
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss_key):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
@@ -27,7 +28,7 @@ def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
     data_loader = make_data_loader(cfg, seed, False, True)
     model.eval()
     result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                               object_detection_loader, stage, perceptual_loss_key)
+                               object_detection_loader, stage, perceptual_loss)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -118,9 +119,6 @@ def get_stage_params(cfg,
         model.module.activate_modules_all()
     else:
         raise SystemError('Invalid pair of part and loss rate')
-    # modules for perceptual loss is always eval
-    # model.module.dmc.vgg.eval()
-    model.module.dmc.rcnn.eval()
 
     # Train method
     if stage_params[2] == 'single_multi':
@@ -154,7 +152,15 @@ def get_stage_params(cfg,
     optimizer.param_groups[0]["lr"] = float(stage_params[5])
 
     # Perceptual loss
-    result['perceptual_loss'] = stage_params[7]
+    if stage_params[7] == 'vgg':
+        perceptual_loss = VGGPerceptualLoss()
+    elif stage_params[7] == 'rcnn':
+        perceptual_loss = FasterRCNNPerceptualLoss()
+    else:
+        raise SystemError('Invalid perceptual loss')
+    perceptual_loss.cuda()
+    perceptual_loss.eval()
+    result['perceptual_loss'] = perceptual_loss
 
     return result
 
@@ -174,11 +180,6 @@ def init_model(cfg, logger, arguments):
     checkpointer = CheckPointer(model, optimizer, None, cfg.OUTPUT_DIR, save_to_disk, logger)
     extra_checkpoint_data = checkpointer.load(cfg.MODEL.PRETRAINED_WEIGHTS)
     arguments.update(extra_checkpoint_data)
-
-    model.module.dmc.rcnn.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
-    for p in model.module.dmc.rcnn.model.parameters():
-        p.requires_grad = False
-    model.module.dmc.rcnn.model.eval()
 
     return model, optimizer, checkpointer
 
@@ -207,7 +208,7 @@ def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
                        input[:, t_i + 1 + p_idx],
                        stage_params['loss_dist_key'],
                        stage_params['loss_rate_keys'],
-                       perceptual_loss_key=stage_params['perceptual_loss'],
+                       perceptual_loss=stage_params['perceptual_loss'],
                        dpb=dpb)
         loss_to_opt = result['loss_to_opt']
         loss_to_opt.backward()
@@ -242,7 +243,7 @@ def cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
                    input,
                    stage_params['loss_dist_key'],
                    stage_params['loss_rate_keys'],
-                   perceptual_loss_key=stage_params['perceptual_loss'],
+                   perceptual_loss=stage_params['perceptual_loss'],
                    dpb=dpb,
                    p_frames=stage_params['p_frames'],
                    t_i=t_i)

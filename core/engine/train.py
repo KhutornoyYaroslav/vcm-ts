@@ -9,10 +9,11 @@ from tqdm import tqdm
 from core.data import make_data_loader, make_object_detection_data_loader
 from core.utils import dist_util
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
+from .losses import VGGPerceptualLoss, FasterRCNNPerceptualLoss
 from .validation import eval_dataset
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss_key):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
@@ -23,7 +24,7 @@ def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
         object_detection_loader = make_object_detection_data_loader(cfg)
     model.eval()
     result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                               object_detection_loader, stage, perceptual_loss_key)
+                               object_detection_loader, stage, perceptual_loss)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -111,9 +112,6 @@ def get_stage_params(cfg,
         model.activate_modules_all()
     else:
         raise SystemError('Invalid pair of part and loss rate')
-    # modules for perceptual loss is always eval
-    # model.dmc.vgg.eval()
-    model.dmc.rcnn.eval()
 
     # Train method
     if stage_params[2] == 'single':
@@ -147,7 +145,15 @@ def get_stage_params(cfg,
     optimizer.param_groups[0]["lr"] = float(stage_params[5])
 
     # Perceptual loss
-    result['perceptual_loss'] = stage_params[7]
+    if stage_params[7] == 'vgg':
+        perceptual_loss = VGGPerceptualLoss()
+    elif stage_params[7] == 'rcnn':
+        perceptual_loss = FasterRCNNPerceptualLoss()
+    else:
+        raise SystemError('Invalid perceptual loss')
+    perceptual_loss.cuda()
+    perceptual_loss.eval()
+    result['perceptual_loss'] = perceptual_loss
 
     return result
 

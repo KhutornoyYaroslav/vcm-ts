@@ -1,6 +1,5 @@
 import torch
 import torchvision
-from torchvision.models import resnet50, ResNet50_Weights
 from torchvision.models.feature_extraction import create_feature_extractor
 
 
@@ -50,7 +49,10 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
         super(FasterRCNNPerceptualLoss, self).__init__()
         # Create model
         self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
-        # self.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
+        self.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
+        for p in self.model.parameters():
+            p.requires_grad = False
+        self.model.eval()
         # Get features
         self.return_nodes = {
             'body.layer1': 'x4',
@@ -59,18 +61,16 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
             'body.layer4': 'x32',
         }
         self.features = create_feature_extractor(self.model.backbone, return_nodes=self.return_nodes)
+        for p in self.features.parameters():
+            p.requires_grad = False
+        self.features.eval()
 
     def forward(self, input, target, feature_layers=['x4', 'x8', 'x16', 'x32']):
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)
 
-        for p in self.features.parameters():
-            p.requires_grad = False
-        self.model.eval()
-
         # Calculate features
-        # with torch.no_grad():
         f_input = self.features.forward(input)
         f_target = self.features.forward(target)
 

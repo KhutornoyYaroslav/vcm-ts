@@ -36,11 +36,6 @@ def train_model(cfg, args):
     extra_checkpoint_data = checkpointer.load(cfg.MODEL.PRETRAINED_WEIGHTS)
     arguments.update(extra_checkpoint_data)
 
-    model.dmc.rcnn.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
-    for p in model.dmc.rcnn.model.parameters():
-        p.requires_grad = False
-    model.dmc.rcnn.model.eval()
-
     # Train model
     model = do_train(cfg, model, data_loader, optimizer, scheduler, checkpointer, args.seed, arguments, args)
 
