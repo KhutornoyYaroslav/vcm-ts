@@ -83,7 +83,7 @@ class IntraNoAR(CompressionModel):
         bits_y = self.get_y_gaussian_bits(y_for_bit, scales_hat)
         bits_z = self.get_z_bits(z_for_bit, self.bit_estimator_z)
         mse = self.mse(x, x_hat)
-        ssim = self.ssim(x, x_hat)
+        # ssim = self.ssim(x, x_hat)
 
         _, _, H, W = x.size()
         pixel_num = H * W
@@ -97,7 +97,7 @@ class IntraNoAR(CompressionModel):
         return {
             "x_hat": x_hat,
             "mse": mse,
-            "ssim": ssim,
+            # "ssim": ssim,
             "bit": bits.item(),
             "bpp": bpp,
             "bpp_y": bpp_y,

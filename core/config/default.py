@@ -9,6 +9,7 @@ _CFG.MODEL = CN()
 _CFG.MODEL.ARCHITECTURE = 'DCVC_HEM'
 _CFG.MODEL.DEVICE = "cpu"
 _CFG.MODEL.PRETRAINED_WEIGHTS = ""
+_CFG.MODEL.I_FRAME_PRETRAINED_WEIGHTS = ""
 
 # -----------------------------------------------------------------------------
 # INPUT

@@ -52,7 +52,7 @@ def delete_unsupported_annotations(annotations, classes):
 
 
 def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                 object_detection_loader=None, stage=0, perceptual_loss=None):
+                 object_detection_loader=None, stage=0, perceptual_loss=None, i_frame_net=None, i_frame_q_scales=None):
     logger = logging.getLogger("CORE.inference")
 
     # Iteration loop
@@ -86,7 +86,9 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
                             loss_rate_keys,
                             p_frames=p_frames,
                             perceptual_loss=perceptual_loss,
-                            is_train=False)
+                            is_train=False,
+                            i_frame_net=i_frame_net,
+                            i_frame_q_scales=i_frame_q_scales)
 
         stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (T-1) -> (1)
         stats['dist'] += torch.mean(torch.sum(outputs['dist'], -1)).item()  # (T-1) -> (1)
@@ -118,28 +120,34 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
                 if frame_idx % cfg.DATASET.OD_GOP_SIZE == 0:
                     dpb = []
                     for i in range(n):
-                        dpb.append({
-                            "ref_frame": input[i],
-                            "ref_feature": None,
-                            "ref_y": None,
-                            "ref_mv_y": None,
-                        })
-
-                    output = forward_yolo(yolo_detection, input[0])
-                    for i in range(n):
-                        output_annotations[i].append(output)
+                        if i_frame_net is not None:
+                            out_i = i_frame_net(input[i], i_frame_q_scales[i])
+                            dpb.append({
+                                "ref_frame": out_i["x_hat"],
+                                "ref_feature": None,
+                                "ref_y": None,
+                                "ref_mv_y": None
+                            })
+                        else:
+                            dpb.append({
+                                "ref_frame": input[i],
+                                "ref_feature": None,
+                                "ref_y": None,
+                                "ref_mv_y": None,
+                            })
+                    torch.cuda.empty_cache()
                 else:
                     dpb = model('forward_simple',
                                 input,
                                 dpb=dpb)
+                    torch.cuda.empty_cache()
 
-                    torch.cuda.empty_cache()
-                    for i in range(n):
-                        input_yolo = dpb[i]["ref_frame"]  # (N, C, H, W)
-                        input_yolo = input_yolo.clamp(0, 1)
-                        output = forward_yolo(yolo_detection, input_yolo)
-                        output_annotations[i].append(output)
-                    torch.cuda.empty_cache()
+                for i in range(n):
+                    input_yolo = dpb[i]["ref_frame"]  # (N, C, H, W)
+                    input_yolo = input_yolo.clamp(0, 1)
+                    output = forward_yolo(yolo_detection, input_yolo)
+                    output_annotations[i].append(output)
+                torch.cuda.empty_cache()
 
         delete_unsupported_annotations(output_annotations, classes)
         metric_map = MeanAveragePrecision(compute_on_cpu=True, sync_on_compute=False, distributed_available_fn=None)

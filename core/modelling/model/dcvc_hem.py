@@ -104,7 +104,9 @@ class DCVC_HEM(nn.Module):
                        loss_rate_keys: List[str],
                        p_frames: int,
                        perceptual_loss: nn.Module,
-                       is_train=True):
+                       is_train=True,
+                       i_frame_net=None,
+                       i_frame_q_scales=None):
         """
         Implements single stage training strategy (I -> P frames).
         See: https://arxiv.org/pdf/2111.13850v1.pdf
@@ -145,12 +147,25 @@ class DCVC_HEM(nn.Module):
 
         for t_i in range(0, t - p_frames):
             # Initialize I-frame
-            dpb = {
-                "ref_frame": input[:, t_i],
-                "ref_feature": None,
-                "ref_y": None,
-                "ref_mv_y": None
-            }
+            if i_frame_net is not None:
+                out_images = []
+                for i in range(n):
+                    with torch.no_grad():
+                        out_i = i_frame_net(input[i, t_i].unsqueeze(0), i_frame_q_scales[i])
+                    out_images.append(out_i["x_hat"].squeeze(0))
+                dpb = {
+                    "ref_frame": torch.stack(out_images, 0),
+                    "ref_feature": None,
+                    "ref_y": None,
+                    "ref_mv_y": None
+                }
+            else:
+                dpb = {
+                    "ref_frame": input[:, t_i],
+                    "ref_feature": None,
+                    "ref_y": None,
+                    "ref_mv_y": None
+                }
 
             input_seqs = []
             decod_seqs = []
@@ -293,7 +308,9 @@ class DCVC_HEM(nn.Module):
                         loss_rate_keys: List[str],
                         p_frames: int,
                         perceptual_loss: nn.Module,
-                        is_train=True):
+                        is_train=True,
+                        i_frame_net=None,
+                        i_frame_q_scales=None):
         """
         Implements cascaded loss training strategy (avg loss).
         See: https://arxiv.org/pdf/2111.13850v1.pdf
@@ -334,12 +351,25 @@ class DCVC_HEM(nn.Module):
 
         for t_i in range(0, t - p_frames):
             # Initialize I-frame
-            dpb = {
-                "ref_frame": input[:, t_i],
-                "ref_feature": None,
-                "ref_y": None,
-                "ref_mv_y": None
-            }
+            if i_frame_net is not None:
+                out_images = []
+                for i in range(n):
+                    with torch.no_grad():
+                        out_i = i_frame_net(input[i, t_i].unsqueeze(0), i_frame_q_scales[i])
+                    out_images.append(out_i["x_hat"].squeeze(0))
+                dpb = {
+                    "ref_frame": torch.stack(out_images, 0),
+                    "ref_feature": None,
+                    "ref_y": None,
+                    "ref_mv_y": None
+                }
+            else:
+                dpb = {
+                    "ref_frame": input[:, t_i],
+                    "ref_feature": None,
+                    "ref_y": None,
+                    "ref_mv_y": None
+                }
 
             input_seqs = []
             decod_seqs = []
@@ -547,15 +577,17 @@ class DCVC_HEM(nn.Module):
                 optimizer: torch.optim.Optimizer = None,
                 is_train=True,
                 dpb=None,
-                t_i=None):
+                t_i=None,
+                i_frame_net=None,
+                i_frame_q_scales=None):
         if forward_method == 'single':
             return self.forward_single(input, optimizer, loss_dist_key, loss_rate_keys, p_frames,
-                                       perceptual_loss, is_train)
+                                       perceptual_loss, is_train, i_frame_net, i_frame_q_scales)
         elif forward_method == 'single_multi':
             return self.forward_single_multi(input, loss_dist_key, loss_rate_keys, dpb, perceptual_loss)
         elif forward_method == 'cascade':
             return self.forward_cascade(input, optimizer, loss_dist_key, loss_rate_keys, p_frames,
-                                        perceptual_loss, is_train)
+                                        perceptual_loss, is_train, i_frame_net, i_frame_q_scales)
         elif forward_method == 'cascade_multi':
             return self.forward_cascade_multi(input, loss_dist_key, loss_rate_keys, dpb, p_frames, t_i,
                                               perceptual_loss)

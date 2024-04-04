@@ -7,6 +7,9 @@ import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+from DCVC_HEM.src.models.image_model import IntraNoAR
+from DCVC_HEM.src.utils.common import interpolate_log
+from DCVC_HEM.src.utils.stream_helper import get_state_dict
 from core.data import make_data_loader, make_object_detection_data_loader
 from core.modelling.model import build_model
 from core.solver import make_optimizer
@@ -17,7 +20,8 @@ from .losses import VGGPerceptualLoss, FasterRCNNPerceptualLoss
 from .validation import eval_dataset
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss,
+            i_frame_net, i_frame_q_scales):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
@@ -28,7 +32,7 @@ def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
     data_loader = make_data_loader(cfg, seed, False, True)
     model.eval()
     result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                               object_detection_loader, stage, perceptual_loss)
+                               object_detection_loader, stage, perceptual_loss, i_frame_net, i_frame_q_scales)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -301,6 +305,26 @@ def do_train(cfg,
     current_stage = get_current_stage(cfg, start_epoch)
     rank = int(os.environ["RANK"])
 
+    # Initialize i frame net
+    if cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS != "":
+        rate_count = len(cfg.SOLVER.LAMBDAS)
+        i_frame_q_scales = IntraNoAR.get_q_scales_from_ckpt(cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS)
+        if len(i_frame_q_scales) == rate_count:
+            pass
+        else:
+            max_q_scale = i_frame_q_scales[0]
+            min_q_scale = i_frame_q_scales[-1]
+            i_frame_q_scales = interpolate_log(min_q_scale, max_q_scale, rate_count)
+
+        i_state_dict = get_state_dict(cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS)
+        i_frame_net = IntraNoAR()
+        i_frame_net.load_state_dict(i_state_dict, strict=False)
+        i_frame_net = i_frame_net.cuda()
+        i_frame_net.eval()
+    else:
+        i_frame_net = None
+        i_frame_q_scales = None
+
     # Epoch loop
     for epoch in range(start_epoch, max_epoch):
         data_loader.sampler.set_epoch(epoch)
@@ -376,12 +400,25 @@ def do_train(cfg,
 
             for t_i in range(0, t - stage_params['p_frames']):
                 # Initialize I-frame
-                dpb = {
-                    "ref_frame": input[:, t_i],
-                    "ref_feature": None,
-                    "ref_y": None,
-                    "ref_mv_y": None
-                }
+                if i_frame_net is not None:
+                    out_images = []
+                    for i in range(n):
+                        with torch.no_grad():
+                            out_i = i_frame_net(input[i, t_i].unsqueeze(0), i_frame_q_scales[i])
+                        out_images.append(out_i["x_hat"].squeeze(0))
+                    dpb = {
+                        "ref_frame": torch.stack(out_images, 0),
+                        "ref_feature": None,
+                        "ref_y": None,
+                        "ref_mv_y": None
+                    }
+                else:
+                    dpb = {
+                        "ref_frame": input[:, t_i],
+                        "ref_feature": None,
+                        "ref_y": None,
+                        "ref_mv_y": None
+                    }
 
                 if stage_params['forward_method'] == 'single_multi':
                     single_step(input, model, stage_params, dpb, optimizer, t_i, outputs)
@@ -498,7 +535,9 @@ def do_train(cfg,
                                   stage_params['p_frames'],
                                   args.seed,
                                   stage_params['stage'] + 1,
-                                  stage_params['perceptual_loss'])
+                                  stage_params['perceptual_loss'],
+                                  i_frame_net,
+                                  i_frame_q_scales)
 
             print(('\n' + 'Evaluation results:' + '%10s' * 3 + '%37s' * 3) % ('loss', 'dist', 'p_dist', 'bpp', 'psnr',
                                                                               'mAP'))
