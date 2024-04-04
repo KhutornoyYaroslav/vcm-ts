@@ -147,12 +147,16 @@ def get_stage_params(cfg,
     # Perceptual loss
     if stage_params[7] == 'vgg':
         perceptual_loss = VGGPerceptualLoss()
+        perceptual_loss.cuda()
+        perceptual_loss.eval()
     elif stage_params[7] == 'rcnn':
         perceptual_loss = FasterRCNNPerceptualLoss()
+        perceptual_loss.cuda()
+        perceptual_loss.eval()
+    elif stage_params[7] == 'none':
+        perceptual_loss = None
     else:
         raise SystemError('Invalid perceptual loss')
-    perceptual_loss.cuda()
-    perceptual_loss.eval()
     result['perceptual_loss'] = perceptual_loss
 
     return result
