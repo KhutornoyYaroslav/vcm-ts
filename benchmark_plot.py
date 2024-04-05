@@ -1,15 +1,22 @@
 import argparse
+import itertools
 import json
 import os
+import re
+from difflib import SequenceMatcher
 from glob import glob
 
+import cv2
+import jaro
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchvision
+from jiwer import cer
+from paddleocr import PaddleOCR
 from pytorch_msssim import MS_SSIM
 from torchmetrics.detection import MeanAveragePrecision
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 from ultralytics import YOLO
 
 from DCVC_HEM.src.utils.png_reader import PNGReader
@@ -41,7 +48,7 @@ def str2bool(v):
 
 def delete_unsupported_annotations(annotations, classes):
     for key in annotations.keys():
-        if key == "yolo_lp_detection" or len(annotations[key]) == 0:
+        if key == "yolo_lp_detection" or key == "ocr_result" or len(annotations[key]) == 0:
             continue
 
         for annotation in annotations[key]:
@@ -173,6 +180,74 @@ def forward_yolo(yolo, x, labels_start_index=1):
         return output
 
 
+def forward_ocr(ocr, image, boxes):
+    result = []
+    for i in range(boxes.shape[0]):
+        x, y, w, h = int(boxes[i][0]), int(boxes[i][1]), int(boxes[i][2]), int(boxes[i][3])
+        plate = np.transpose(image[0, :, y:h, x:w].cpu().numpy(), (1, 2, 0)) * 255
+        plate = cv2.cvtColor(plate, cv2.COLOR_RGB2GRAY)
+        plate = cv2.resize(plate, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+        result_ocr = ocr.ocr(plate, cls=False, det=False)
+        result_ocr = re.sub('[^A-Z0-9]+', '', result_ocr[0][0][0].upper())
+        result.append(result_ocr)
+
+    return result
+
+
+def calculate_accuracy_symbolically(text1, text2):
+    num_matches = 0
+    if len(text1) == 0 and len(text2) == 1:
+        return 1
+    if len(text1) == 0:
+        return 0
+    for symbol1, symbol2 in zip(text1, text2):
+        if symbol1 == symbol2:
+            num_matches += 1
+    accuracy = num_matches / len(text1)
+    return accuracy
+
+
+def calculate_ocr_metrics(dataset_annotations, annotations):
+    full = 0
+    symbol_equal_len = 0
+    symbol_nonequal_len = 0
+    RO = 0
+    JW = 0
+    cer_value = 0
+    assert len(dataset_annotations) == len(annotations), "Annotations size for calculate ocr metrics should be the same"
+    for dataset_annotation, annotation in zip(dataset_annotations, annotations):
+        # Full text match
+        if dataset_annotation == annotation:
+            full += 1
+
+        # Symbolically test weighted match, equal length
+        if len(dataset_annotation) == len(annotation):
+            symbol_equal_len += calculate_accuracy_symbolically(dataset_annotation, annotation)
+
+        # Symbolically test weighted match, non-equal length
+        symbol_nonequal_len += calculate_accuracy_symbolically(dataset_annotation, annotation)
+
+        # Ratcliff and Obershelp algorithm match
+        s = SequenceMatcher(None, dataset_annotation, annotation)
+        RO += s.ratio()
+
+        # Jaro-Winkler algorithm match
+        JW += jaro.jaro_winkler_metric(dataset_annotation, annotation)
+
+        # CER (1 - CER value) match
+        cer_value += 1 - cer(dataset_annotation, annotation)
+
+    length = len(dataset_annotations)
+    return {
+        "full": full / length * 100,
+        "symbol_equal_len": symbol_equal_len / length * 100,
+        "symbol_nonequal_len": symbol_nonequal_len / length * 100,
+        "RO": RO / length * 100,
+        "JW": JW / length * 100,
+        "cer": cer_value / length * 100
+    }
+
+
 def calculate_metrics(dataset,
                       images,
                       annotations,
@@ -183,11 +258,19 @@ def calculate_metrics(dataset,
 
     dataset_images = dataset[video_name]['images']
     mean_ap = {}
+    ocr_results = {}
     for model in annotations.keys():
         if len(annotations[model]) == 0:
             continue
 
-        if model in ['rcnn', 'yolo_detection']:
+        if model == 'ocr_result':
+            dataset_annotations = dataset[video_name]['annotations']['license_recognition']
+            merged_annotations = list(itertools.chain.from_iterable(annotations[model]))
+            merged_dataset_annotations = map(lambda d: d['texts'], dataset_annotations)
+            merged_dataset_annotations = list(itertools.chain.from_iterable(merged_dataset_annotations))
+            ocr_results = calculate_ocr_metrics(merged_dataset_annotations, merged_annotations)
+            continue
+        elif model in ['rcnn', 'yolo_detection']:
             dataset_annotations = dataset[video_name]['annotations']['object_detection']
         elif model == 'yolo_lp_detection':
             dataset_annotations = dataset[video_name]['annotations']['license_detection']
@@ -213,18 +296,20 @@ def calculate_metrics(dataset,
         ssim = torch.mean(ssim, -1).item()
     else:
         ssim = None
-    return mean_ap, psnr, ssim
+    return mean_ap, ocr_results, psnr, ssim
 
 
 def get_metrics(decod_dir: str,
                 rcnn,
                 yolo_detection,
                 yolo_lp_detection,
+                ocr,
                 dataset,
                 device: str,
                 use_ms_ssim: bool):
     metrics = {}
     model_folders = [f for f in os.scandir(decod_dir) if f.is_dir()]
+    dataset_videos = dataset.keys()
 
     for model_folder in model_folders:
         print(f'Calculate metrics for {model_folder.name}')
@@ -232,6 +317,8 @@ def get_metrics(decod_dir: str,
         video_folders = [f for f in os.scandir(model_folder) if f.is_dir()]
 
         for video_folder in video_folders:
+            if video_folder.name not in dataset_videos:
+                continue
             print(f'\tCalculate metrics for video {video_folder.name}')
             metrics[model_folder.name][video_folder.name] = []
             images_folders = [f for f in os.scandir(video_folder) if f.is_dir()]
@@ -252,13 +339,14 @@ def get_metrics(decod_dir: str,
                 annotations = {
                     'rcnn': [],
                     'yolo_detection': [],
-                    'yolo_lp_detection': []
+                    'yolo_lp_detection': [],
+                    'ocr_result': []
                 }
                 source_images = sorted(glob(os.path.join(images_folder, "*.png")))
 
                 print(f'\t\tObjects detection and recognition')
                 src_reader = PNGReader(images_folder.path)
-                for _ in tqdm(range(len(source_images))):
+                for i in tqdm(range(len(source_images))):
                     rgb = src_reader.read_one_frame(src_format="rgb")
                     image = np_image_to_tensor(rgb)
                     image = image.to(device)
@@ -272,7 +360,9 @@ def get_metrics(decod_dir: str,
                         yolo_lp_detection_output = forward_yolo(yolo_lp_detection, image, 0)
                         annotations['yolo_lp_detection'].append(yolo_lp_detection_output)
                     elif "license_recognition" in annotation_types:
-                        pass
+                        boxes = dataset[video_folder.name]["annotations"]["license_recognition"][i]["boxes"]
+                        ocr_result = forward_ocr(ocr, image, boxes)
+                        annotations['ocr_result'].append(ocr_result)
 
                     image = image.cpu()
                     torch.cuda.empty_cache()
@@ -281,9 +371,10 @@ def get_metrics(decod_dir: str,
                 delete_unsupported_annotations(annotations, dataset['classes'])
 
                 print(f'\t\tCalculate metrics')
-                mean_ap, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name, use_ms_ssim)
+                mean_ap, ocr_results, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name, use_ms_ssim)
                 metrics_info = dict(
                     mean_ap=mean_ap,
+                    ocr_results=ocr_results,
                     psnr=psnr,
                     ssim=ssim,
                     bpp=bpp,
@@ -304,6 +395,7 @@ def plot_graphs(metrics, out_path: str, use_ms_ssim: bool):
     for video in videos:
         detection_models = sorted(list(metrics[codecs[0]][video][0]['mean_ap'].keys()))
         for detection_model in detection_models:
+            plt.figure(figsize=(16, 9))
             for codec in codecs:
                 bpps = [info['bpp'] for info in metrics[codec][video]]
                 maps = [info['mean_ap'][detection_model] for info in metrics[codec][video]]
@@ -318,6 +410,24 @@ def plot_graphs(metrics, out_path: str, use_ms_ssim: bool):
             plt.savefig(os.path.join(out_path, f"detection_model_{detection_model}_{video}.png"))
             plt.show()
 
+        matchers = sorted(list(metrics[codecs[0]][video][0]['ocr_results'].keys()))
+        for matcher in matchers:
+            plt.figure(figsize=(16, 9))
+            for codec in codecs:
+                bpps = [info['bpp'] for info in metrics[codec][video]]
+                match_values = [info['ocr_results'][matcher] for info in metrics[codec][video]]
+                x = np.array(bpps)
+                y = np.array(match_values)
+                plt.plot(x, y, 'o-', label=codec)
+            plt.legend()
+            plt.grid()
+            plt.title(f'Text matching on {matcher} for {video}')
+            plt.xlabel('bpp')
+            plt.ylabel('Metric value, %')
+            plt.savefig(os.path.join(out_path, f"text_match_{matcher}_{video}.png"))
+            plt.show()
+
+        plt.figure(figsize=(16, 9))
         for codec in codecs:
             bpps = [info['bpp'] for info in metrics[codec][video]]
             psnrs = [info['psnr'] for info in metrics[codec][video]]
@@ -333,6 +443,7 @@ def plot_graphs(metrics, out_path: str, use_ms_ssim: bool):
         plt.show()
 
         if use_ms_ssim:
+            plt.figure(figsize=(16, 9))
             for codec in codecs:
                 bpps = [info['bpp'] for info in metrics[codec][video]]
                 ssims = [info['ssim'] for info in metrics[codec][video]]
@@ -396,10 +507,13 @@ def main():
     yolo_lp_detection = YOLO('pretrained/yolov8-lp.pt')
     yolo_lp_detection = yolo_lp_detection.to(config["device"])
 
+    ocr = PaddleOCR(use_angle_cls=True, lang='en', rec_algorithm='SVTR_LCNet')
+
     metrics = get_metrics(config["decoded_dir"],
                           rcnn,
                           yolo_detection,
                           yolo_lp_detection,
+                          ocr,
                           dataset,
                           config["device"],
                           config["ms_ssim"])
