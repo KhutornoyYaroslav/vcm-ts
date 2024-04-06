@@ -106,6 +106,9 @@ def read_license_recognition(annotation, device):
 
 
 def read_dataset(config,
+                 rcnn,
+                 yolo_detection,
+                 yolo_lp_detection,
                  device: str):
     dataset = {}
     metadata = os.path.join(config["dataset_dir"], "metadata.txt")
@@ -148,6 +151,29 @@ def read_dataset(config,
             images.append(image)
 
         dataset[sequence["name"]] = dict(images=images, annotations=annotations)
+
+        annotation_types = annotations.keys()
+        mean_ap = 0
+        if "object_detection" in annotation_types or "license_detection" in annotation_types:
+            origin_annotations = {
+                'rcnn': [],
+                'yolo_detection': [],
+                'yolo_lp_detection': []
+            }
+            for image in tqdm(images):
+                if "object_detection" in annotation_types:
+                    rcnn_output = forward_rcnn(rcnn, image.cuda())
+                    yolo_detection_output = forward_yolo(yolo_detection, image.cuda())
+                    origin_annotations['rcnn'].append(rcnn_output)
+                    origin_annotations['yolo_detection'].append(yolo_detection_output)
+                elif "license_detection" in annotation_types:
+                    yolo_lp_detection_output = forward_yolo(yolo_lp_detection, image.cuda(), 0)
+                    origin_annotations['yolo_lp_detection'].append(yolo_lp_detection_output)
+
+            delete_unsupported_annotations(origin_annotations, dataset['classes'])
+            mean_ap = calculate_mean_ap(origin_annotations, dataset, sequence["name"])
+
+        dataset[sequence["name"]]["mean_ap"] = mean_ap
 
     return dataset
 
@@ -248,27 +274,14 @@ def calculate_ocr_metrics(dataset_annotations, annotations):
     }
 
 
-def calculate_metrics(dataset,
-                      images,
-                      annotations,
-                      video_name: str,
-                      use_ms_ssim: bool):
+def calculate_mean_ap(annotations, dataset, video_name):
     metric_map = MeanAveragePrecision()
-    metric_ssim = MS_SSIM(data_range=1.0, size_average=False)
-
-    dataset_images = dataset[video_name]['images']
     mean_ap = {}
-    ocr_results = {}
     for model in annotations.keys():
         if len(annotations[model]) == 0:
             continue
 
         if model == 'ocr_result':
-            dataset_annotations = dataset[video_name]['annotations']['license_recognition']
-            merged_annotations = list(itertools.chain.from_iterable(annotations[model]))
-            merged_dataset_annotations = map(lambda d: d['texts'], dataset_annotations)
-            merged_dataset_annotations = list(itertools.chain.from_iterable(merged_dataset_annotations))
-            ocr_results = calculate_ocr_metrics(merged_dataset_annotations, merged_annotations)
             continue
         elif model in ['rcnn', 'yolo_detection']:
             dataset_annotations = dataset[video_name]['annotations']['object_detection']
@@ -279,7 +292,26 @@ def calculate_metrics(dataset,
         metric_map.update(annotations[model], dataset_annotations)
         map_metrics = metric_map.compute()
         model_mean_ap = map_metrics['map_50'].item()
-        mean_ap[model] = model_mean_ap
+        mean_ap[model] = model_mean_ap * 100
+
+    return mean_ap
+
+
+def calculate_metrics(dataset,
+                      images,
+                      annotations,
+                      video_name: str,
+                      use_ms_ssim: bool):
+    metric_ssim = MS_SSIM(data_range=1.0, size_average=False)
+    dataset_images = dataset[video_name]['images']
+    ocr_results = {}
+    if 'ocr_result' in annotations.keys() and len(annotations['ocr_result']) != 0:
+        dataset_annotations = dataset[video_name]['annotations']['license_recognition']
+        merged_annotations = list(itertools.chain.from_iterable(annotations['ocr_result']))
+        merged_dataset_annotations = map(lambda d: d['texts'], dataset_annotations)
+        merged_dataset_annotations = list(itertools.chain.from_iterable(merged_dataset_annotations))
+        ocr_results = calculate_ocr_metrics(merged_dataset_annotations, merged_annotations)
+    mean_ap = calculate_mean_ap(annotations, dataset, video_name)
 
     psnr_list = []
     ssim_list = []
@@ -387,7 +419,7 @@ def get_metrics(decod_dir: str,
     return metrics
 
 
-def plot_graphs(metrics, out_path: str, use_ms_ssim: bool):
+def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
     os.makedirs(out_path, exist_ok=True)
@@ -396,6 +428,13 @@ def plot_graphs(metrics, out_path: str, use_ms_ssim: bool):
         detection_models = sorted(list(metrics[codecs[0]][video][0]['mean_ap'].keys()))
         for detection_model in detection_models:
             plt.figure(figsize=(16, 9))
+            orig_map = dataset[video]['mean_ap'][detection_model]
+            map_loss_1 = orig_map / 100 * 99
+            map_loss_2 = orig_map / 100 * 98
+            plt.axhline(y=orig_map, color='k', linestyle='dashed',
+                        label=f'Original performance ({orig_map:.2f}%)')
+            plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label='1% mAP loss')
+            plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label='2% mAP loss')
             for codec in codecs:
                 bpps = [info['bpp'] for info in metrics[codec][video]]
                 maps = [info['mean_ap'][detection_model] for info in metrics[codec][video]]
@@ -494,8 +533,6 @@ def main():
         config = json.load(f)
 
     print('Reading dataset')
-    dataset = read_dataset(config, 'cpu')  # cpu for optimization video memory
-
     pretrained_weights = torchvision.models.detection.FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1
     rcnn = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=pretrained_weights)
     rcnn = rcnn.to(config["device"])
@@ -506,6 +543,9 @@ def main():
 
     yolo_lp_detection = YOLO('pretrained/yolov8-lp.pt')
     yolo_lp_detection = yolo_lp_detection.to(config["device"])
+
+    # cpu for optimization video memory
+    dataset = read_dataset(config, rcnn, yolo_detection, yolo_lp_detection, 'cpu')
 
     ocr = PaddleOCR(use_angle_cls=True, lang='en', rec_algorithm='SVTR_LCNet')
 
@@ -518,7 +558,7 @@ def main():
                           config["device"],
                           config["ms_ssim"])
 
-    plot_graphs(metrics, config["out_path"], config["ms_ssim"])
+    plot_graphs(metrics, dataset, config["out_path"], config["ms_ssim"])
 
 
 if __name__ == "__main__":
