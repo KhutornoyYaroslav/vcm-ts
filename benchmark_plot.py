@@ -429,8 +429,8 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
         for detection_model in detection_models:
             plt.figure(figsize=(16, 9))
             orig_map = dataset[video]['mean_ap'][detection_model]
-            map_loss_1 = orig_map / 100 * 99
-            map_loss_2 = orig_map / 100 * 98
+            map_loss_1 = orig_map - 1
+            map_loss_2 = orig_map - 2
             plt.axhline(y=orig_map, color='k', linestyle='dashed',
                         label=f'Original performance ({orig_map:.2f}%)')
             plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label='1% mAP loss')
