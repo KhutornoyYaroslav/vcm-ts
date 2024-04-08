@@ -16,7 +16,7 @@ from core.solver import make_optimizer
 from core.utils import dist_util
 from core.utils.checkpoint import CheckPointer
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
-from .losses import VGGPerceptualLoss, FasterRCNNPerceptualLoss
+from .losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss
 from .validation import eval_dataset
 
 
@@ -161,7 +161,7 @@ def get_stage_params(cfg,
         perceptual_loss.cuda()
         perceptual_loss.eval()
     elif stage_params[7] == 'rcnn':
-        perceptual_loss = FasterRCNNPerceptualLoss()
+        perceptual_loss = FasterRCNNFPNPerceptualLoss()
         perceptual_loss.cuda()
         perceptual_loss.eval()
     elif stage_params[7] == 'none':

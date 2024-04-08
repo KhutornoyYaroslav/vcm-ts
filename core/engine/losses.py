@@ -82,3 +82,37 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
                 loss += torch.mean(loss_, dim=(1, 2, 3))
 
         return loss
+
+
+class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
+    def __init__(self):
+        super(FasterRCNNFPNPerceptualLoss, self).__init__()
+        # Create model
+        self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
+        self.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
+        for p in self.model.parameters():
+            p.requires_grad = False
+        self.model.eval()
+        # Get features
+        self.features = self.model.backbone
+        for p in self.features.parameters():
+            p.requires_grad = False
+        self.features.eval()
+
+    def forward(self, input, target, feature_layers=['0', '1', '2', '3', 'pool']):
+        if input.shape[1] != 3:
+            input = input.repeat(1, 3, 1, 1)
+            target = target.repeat(1, 3, 1, 1)
+
+        # Calculate features
+        f_input = self.features.forward(input)
+        f_target = self.features.forward(target)
+
+        # Calculate loss
+        loss = 0.0
+        for key in f_input.keys():
+            if key in feature_layers:
+                loss_ = torch.nn.functional.mse_loss(f_input[key], f_target[key], reduction='none')
+                loss += torch.mean(loss_, dim=(1, 2, 3))
+
+        return loss
