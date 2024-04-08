@@ -15,6 +15,8 @@ class DCVC_HEM(nn.Module):
         self.lambdas.requires_grad = False
         self.pl_lambda = torch.tensor(cfg.SOLVER.PL_LAMBDA).cuda()
         self.pl_lambda.requires_grad = False
+        self.dist_lambda = torch.tensor(cfg.SOLVER.DIST_LAMBDA).cuda()
+        self.dist_lambda.requires_grad = False
 
         self.inter_modules_dist = [
             self.dmc.bit_estimator_z_mv,
@@ -197,7 +199,7 @@ class DCVC_HEM(nn.Module):
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
-                loss = rate + lambdas * (dist + perceptual_dist * self.pl_lambda)
+                loss = rate + lambdas * (dist * self.dist_lambda + perceptual_dist * self.pl_lambda)
                 loss_to_opt = torch.mean(loss)  # (N) -> (1)
                 
                 loss_list.append(loss)
@@ -285,7 +287,7 @@ class DCVC_HEM(nn.Module):
         else:
             perceptual_dist = torch.zeros_like(self.lambdas)
 
-        loss = rate + lambdas * (dist + perceptual_dist * self.pl_lambda)
+        loss = rate + lambdas * (dist * self.dist_lambda + perceptual_dist * self.pl_lambda)
 
         loss_to_opt = torch.mean(loss)  # (N) -> (1)
         result = {
@@ -406,7 +408,7 @@ class DCVC_HEM(nn.Module):
                 rate_list.append(rate)
                 dist_list.append(dist)
                 p_dist_list.append(perceptual_dist)
-                loss_list.append(rate + lambdas * (dist + perceptual_dist * self.pl_lambda))
+                loss_list.append(rate + lambdas * (dist * self.dist_lambda + perceptual_dist * self.pl_lambda))
                 input_seqs.append(input[:, t_i + 1 + p_idx])
                 decod_seqs.append(dpb["ref_frame"])
 
@@ -520,7 +522,7 @@ class DCVC_HEM(nn.Module):
             rate_list.append(rate)
             dist_list.append(dist)
             p_dist_list.append(perceptual_dist)
-            loss_list.append(rate + lambdas * (dist + perceptual_dist * self.pl_lambda))
+            loss_list.append(rate + lambdas * (dist * self.dist_lambda + perceptual_dist * self.pl_lambda))
             input_seqs.append(input[:, t_i + 1 + p_idx])
             decod_seqs.append(dpb["ref_frame"])
 
