@@ -358,6 +358,14 @@ def get_metrics(decod_dir: str,
             annotation_types = dataset[video_folder.name]["annotations"].keys()
 
             for images_folder in images_folders:
+                metrics_json = images_folder.path + '_metrics.json'
+                if os.path.exists(metrics_json):
+                    with open(metrics_json) as f:
+                        metrics_info = json.load(f)
+                    metrics[model_folder.name][video_folder.name].append(metrics_info)
+                    print(f'\t\tRead metrics for {images_folder.name} from json')
+                    continue
+
                 info_json = images_folder.path + '.json'
                 with open(info_json) as f:
                     seq_info = json.load(f)
@@ -415,6 +423,8 @@ def get_metrics(decod_dir: str,
                     quality=images_folder.name
                 )
                 metrics[model_folder.name][video_folder.name].append(metrics_info)
+                with open(metrics_json, 'w') as fp:
+                    json.dump(metrics_info, fp)
 
     return metrics
 
