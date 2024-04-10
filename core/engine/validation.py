@@ -3,11 +3,13 @@ import os
 
 import numpy as np
 import torch
+import torchvision
 from torchmetrics.detection import MeanAveragePrecision
 from tqdm import tqdm
 from ultralytics import YOLO
 
 from DCVC_HEM.src.utils.stream_helper import get_padding_size
+from core.engine.losses import FasterRCNNFPNPerceptualLoss, FasterRCNNPerceptualLoss
 from core.utils.tensorboard import add_best_and_worst_sample
 
 
@@ -37,6 +39,15 @@ def forward_yolo(yolo, x, labels_start_index=1):
         output['boxes'] = result.boxes.xyxy.cpu()
         output['labels'] = result.boxes.cls.cpu().type(torch.int64) + labels_start_index  # yolo names start from 0
         output['scores'] = result.boxes.conf.cpu()
+        return output
+
+
+def forward_rcnn(rcnn, x):
+    with torch.no_grad():
+        output = rcnn(x)[0]  # batch = 1
+        output['boxes'] = output['boxes'].cpu()
+        output['labels'] = output['labels'].cpu()
+        output['scores'] = output['scores'].cpu()
         return output
 
 
@@ -100,8 +111,15 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
         add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
 
     if object_detection_loader is not None and stage >= cfg.DATASET.OD_STAGE:
-        yolo_detection = YOLO('pretrained/yolov8m.pt')
-        yolo_detection = yolo_detection.cuda()
+        if (isinstance(perceptual_loss, FasterRCNNFPNPerceptualLoss) or
+                isinstance(perceptual_loss, FasterRCNNPerceptualLoss)):
+            detector = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
+            detector.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
+            detector.cuda()
+            detector.eval()
+        else:
+            detector = YOLO('pretrained/yolov8m.pt')
+            detector = detector.cuda()
         classes = read_dataset_classes(cfg)
         output_annotations = [[] for _ in range(n)]
         source_annotations = [[] for _ in range(n)]
@@ -143,11 +161,15 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
                     torch.cuda.empty_cache()
 
                 for i in range(n):
-                    input_yolo = dpb[i]["ref_frame"]  # (N, C, H, W)
-                    input_yolo = input_yolo.clamp(0, 1)
-                    output = forward_yolo(yolo_detection, input_yolo)
+                    input_to_detect = dpb[i]["ref_frame"]  # (N, C, H, W)
+                    input_to_detect = input_to_detect.clamp(0, 1)
+                    if (isinstance(perceptual_loss, FasterRCNNFPNPerceptualLoss) or
+                            isinstance(perceptual_loss, FasterRCNNPerceptualLoss)):
+                        output = forward_rcnn(detector, input_to_detect)
+                    else:
+                        output = forward_yolo(detector, input_to_detect)
                     output_annotations[i].append(output)
-                torch.cuda.empty_cache()
+                    torch.cuda.empty_cache()
 
         delete_unsupported_annotations(output_annotations, classes)
         metric_map = MeanAveragePrecision(compute_on_cpu=True, sync_on_compute=False, distributed_available_fn=None)
