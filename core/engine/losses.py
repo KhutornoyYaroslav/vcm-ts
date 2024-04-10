@@ -1,6 +1,9 @@
 import torch
 import torchvision
 from torchvision.models.feature_extraction import create_feature_extractor
+from ultralytics import YOLO
+
+from DCVC_HEM.src.utils.stream_helper import get_padding_size
 
 
 class VGGPerceptualLoss(torch.nn.Module):
@@ -27,8 +30,8 @@ class VGGPerceptualLoss(torch.nn.Module):
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)
 
-        input = (input-self.mean) / self.std
-        target = (target-self.mean) / self.std
+        input = (input - self.mean) / self.std
+        target = (target - self.mean) / self.std
         if self.resize:
             input = self.transform(input, mode='bilinear', size=(224, 224), align_corners=False)
             target = self.transform(target, mode='bilinear', size=(224, 224), align_corners=False)
@@ -114,5 +117,59 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
             if key in feature_layers:
                 loss_ = torch.nn.functional.mse_loss(f_input[key], f_target[key], reduction='none')
                 loss += torch.mean(loss_, dim=(1, 2, 3))
+
+        return loss
+
+
+class YOLOV8PerceptualLoss(torch.nn.Module):
+    def __init__(self):
+        super(YOLOV8PerceptualLoss, self).__init__()
+        # Create model
+        self.model = YOLO('pretrained/yolov8m.pt')
+        for p in self.model.parameters():
+            p.requires_grad = False
+
+    def get_features(self, input):
+        y = []
+        features = None
+        for m in self.model.model.model:
+            if m.f != -1:  # if not from previous layer
+                input = y[m.f] if isinstance(m.f, int) else [input if j == -1 else y[j] for j in
+                                                             m.f]  # from earlier layers
+            if torch.is_tensor(input):
+                features = input  # keep the last tensor as features
+            input = m(input)  # run
+            if torch.is_tensor(input):
+                features = input  # keep the last tensor as features
+            y.append(input if m.i in self.model.model.save else None)  # save output
+            torch.cuda.empty_cache()
+        if torch.is_tensor(input):
+            features = input  # keep the last tensor as features
+        del y
+        torch.cuda.empty_cache()
+        return features
+
+    def forward(self, input, target):
+        pic_height = input.shape[2]
+        pic_width = input.shape[3]
+        padding_l, padding_r, padding_t, padding_b = get_padding_size(pic_height, pic_width, p=32)
+        input_padded = torch.nn.functional.pad(
+            input,
+            (padding_l, padding_r, padding_t, padding_b),
+            mode="constant",
+            value=0,
+        )
+        target_padded = torch.nn.functional.pad(
+            target,
+            (padding_l, padding_r, padding_t, padding_b),
+            mode="constant",
+            value=0,
+        )
+        f_input = self.get_features(input_padded)
+        f_target = self.get_features(target_padded)
+
+        # Calculate loss
+        loss_ = torch.nn.functional.mse_loss(f_input, f_target, reduction='none')
+        loss = torch.mean(loss_, dim=(1, 2, 3))
 
         return loss

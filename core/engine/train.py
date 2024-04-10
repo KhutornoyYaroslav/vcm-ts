@@ -12,7 +12,7 @@ from DCVC_HEM.src.utils.stream_helper import get_state_dict
 from core.data import make_data_loader, make_object_detection_data_loader
 from core.utils import dist_util
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
-from .losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss
+from .losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss, YOLOV8PerceptualLoss
 from .validation import eval_dataset
 
 
@@ -157,6 +157,9 @@ def get_stage_params(cfg,
         perceptual_loss = FasterRCNNFPNPerceptualLoss()
         perceptual_loss.cuda()
         perceptual_loss.eval()
+    elif stage_params[7] == 'yolo':
+        perceptual_loss = YOLOV8PerceptualLoss()
+        perceptual_loss.cuda()
     elif stage_params[7] == 'none':
         perceptual_loss = None
     else:
