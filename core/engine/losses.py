@@ -128,6 +128,7 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
         self.model = YOLO('pretrained/yolov8m.pt')
         for p in self.model.parameters():
             p.requires_grad = False
+        self.model.model.model.eval()
 
     def get_features(self, input):
         y = []
@@ -142,11 +143,8 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
             if torch.is_tensor(input):
                 features = input  # keep the last tensor as features
             y.append(input if m.i in self.model.model.save else None)  # save output
-            torch.cuda.empty_cache()
         if torch.is_tensor(input):
             features = input  # keep the last tensor as features
-        del y
-        torch.cuda.empty_cache()
         return features
 
     def forward(self, input, target):
