@@ -25,10 +25,13 @@ class VGGPerceptualLoss(torch.nn.Module):
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
-    def forward(self, input, target, feature_layers=[0, 1, 2, 3]):
+    def forward(self, target, input, feature_layers=[0, 1, 2, 3]):
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)
+
+        input = input.clamp(0, 1)
+        target = target.clamp(0, 1)
 
         input = (input - self.mean) / self.std
         target = (target - self.mean) / self.std
@@ -68,10 +71,13 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
             p.requires_grad = False
         self.features.eval()
 
-    def forward(self, input, target, feature_layers=['x4', 'x8', 'x16', 'x32']):
+    def forward(self, target, input, feature_layers=['x4', 'x8', 'x16', 'x32']):
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)
+
+        input = input.clamp(0, 1)
+        target = target.clamp(0, 1)
 
         # Calculate features
         f_input = self.features.forward(input)
@@ -102,10 +108,13 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
             p.requires_grad = False
         self.features.eval()
 
-    def forward(self, input, target, feature_layers=['0', '1', '2', '3', 'pool']):
+    def forward(self, target, input, feature_layers=['0', '1', '2', '3', 'pool']):
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)
+
+        input = input.clamp(0, 1)
+        target = target.clamp(0, 1)
 
         # Calculate features
         f_input = self.features.forward(input)
@@ -147,7 +156,10 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
             features = input  # keep the last tensor as features
         return features
 
-    def forward(self, input, target):
+    def forward(self, target, input):
+        input = input.clamp(0, 1)
+        target = target.clamp(0, 1)
+
         pic_height = input.shape[2]
         pic_width = input.shape[3]
         padding_l, padding_r, padding_t, padding_b = get_padding_size(pic_height, pic_width, p=32)
