@@ -108,7 +108,7 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
             p.requires_grad = False
         self.features.eval()
 
-    def forward(self, target, input, feature_layers=['0', '1', '2', '3', 'pool']):
+    def forward(self, target, input, feature_layers=['1']):  # ['0', '1', '2', '3', 'pool']
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)
@@ -139,21 +139,19 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
             p.requires_grad = False
         self.model.model.model.eval()
 
-    def get_features(self, input):
+    def get_features(self, input, layers=[0, 3, 7]):
         y = []
-        features = None
-        for m in self.model.model.model:
+        features = []
+        for i, m in enumerate(self.model.model.model):
             if m.f != -1:  # if not from previous layer
                 input = y[m.f] if isinstance(m.f, int) else [input if j == -1 else y[j] for j in
                                                              m.f]  # from earlier layers
-            if torch.is_tensor(input):
-                features = input  # keep the last tensor as features
             input = m(input)  # run
-            if torch.is_tensor(input):
-                features = input  # keep the last tensor as features
+            if i in layers:
+                features.append(input)
             y.append(input if m.i in self.model.model.save else None)  # save output
-        if torch.is_tensor(input):
-            features = input  # keep the last tensor as features
+            if len(features) == len(layers):
+                break
         return features
 
     def forward(self, target, input):
@@ -179,7 +177,9 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
         f_target = self.get_features(target_padded)
 
         # Calculate loss
-        loss_ = torch.nn.functional.mse_loss(f_input, f_target, reduction='none')
-        loss = torch.mean(loss_, dim=(1, 2, 3))
+        loss = 0.0
+        for index in range(len(f_input)):
+            loss_ = torch.nn.functional.mse_loss(f_input[index], f_target[index], reduction='none')
+            loss += torch.mean(loss_, dim=(1, 2, 3))
 
         return loss
