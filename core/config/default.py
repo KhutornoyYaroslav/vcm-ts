@@ -47,6 +47,7 @@ _CFG.DATA_LOADER.PIN_MEMORY = True
 # ---------------------------------------------------------------------------- #
 _CFG.SOLVER = CN()
 _CFG.SOLVER.LAMBDAS = [85, 170, 380, 840]
+_CFG.SOLVER.PL_MODEL = 'vgg'
 _CFG.SOLVER.PL_LAMBDA = 1e+1
 _CFG.SOLVER.DIST_LAMBDA = 1.0
 _CFG.SOLVER.LR = 1e-4

@@ -16,14 +16,16 @@ class VGGPerceptualLoss(torch.nn.Module):
         blocks.append(vgg16.features[4:9].eval())
         blocks.append(vgg16.features[9:16].eval())
         blocks.append(vgg16.features[16:23].eval())
-        for bl in blocks:
-            for p in bl.parameters():
-                p.requires_grad = False
         self.blocks = torch.nn.ModuleList(blocks)
         self.transform = torch.nn.functional.interpolate
         self.resize = resize
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+
+    def disable_gradients(self):
+        for bl in self.blocks:
+            for p in bl.parameters():
+                p.requires_grad = False
 
     def forward(self, target, input, feature_layers=[0, 1, 2, 3]):
         if input.shape[1] != 3:
@@ -38,7 +40,7 @@ class VGGPerceptualLoss(torch.nn.Module):
         if self.resize:
             input = self.transform(input, mode='bilinear', size=(224, 224), align_corners=False)
             target = self.transform(target, mode='bilinear', size=(224, 224), align_corners=False)
-        loss = 0.0
+        loss = []
         x = input
         y = target
         for i, block in enumerate(self.blocks):
@@ -46,7 +48,10 @@ class VGGPerceptualLoss(torch.nn.Module):
             y = block(y)
             if i in feature_layers:
                 loss_ = torch.nn.functional.mse_loss(x, y, reduction='none')
-                loss += torch.mean(loss_, dim=(1, 2, 3))
+                loss.append(torch.mean(loss_, dim=(1, 2, 3)))
+        loss = torch.stack(loss)
+        loss = torch.sum(loss, 0)
+
         return loss  # (N)
 
 
@@ -58,8 +63,6 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
         # Create model
         self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
         self.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
-        for p in self.model.parameters():
-            p.requires_grad = False
         self.model.eval()
         # Get features
         self.return_nodes = {
@@ -69,9 +72,13 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
             'body.layer4': 'x32',
         }
         self.features = create_feature_extractor(self.model.backbone, return_nodes=self.return_nodes)
+        self.features.eval()
+
+    def disable_gradients(self):
+        for p in self.model.parameters():
+            p.requires_grad = False
         for p in self.features.parameters():
             p.requires_grad = False
-        self.features.eval()
 
     def forward(self, target, input, feature_layers=['x4', 'x8', 'x16', 'x32']):
         if input.shape[1] != 3:
@@ -90,11 +97,13 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
         f_target = self.features.forward(target)
 
         # Calculate loss
-        loss = 0.0
+        loss = []
         for key in f_input.keys():
             if key in feature_layers:
                 loss_ = torch.nn.functional.mse_loss(f_input[key], f_target[key], reduction='none')
-                loss += torch.mean(loss_, dim=(1, 2, 3))
+                loss.append(torch.mean(loss_, dim=(1, 2, 3)))
+        loss = torch.stack(loss)
+        loss = torch.sum(loss, 0)
 
         return loss
 
@@ -107,14 +116,16 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
         # Create model
         self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
         self.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
-        for p in self.model.parameters():
-            p.requires_grad = False
         self.model.eval()
         # Get features
         self.features = self.model.backbone
+        self.features.eval()
+
+    def disable_gradients(self):
+        for p in self.model.parameters():
+            p.requires_grad = False
         for p in self.features.parameters():
             p.requires_grad = False
-        self.features.eval()
 
     def forward(self, target, input, feature_layers=['0', '1', '2', '3', 'pool']):  # ['0', '1', '2', '3', 'pool']
         if input.shape[1] != 3:
@@ -133,11 +144,13 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
         f_target = self.features.forward(target)
 
         # Calculate loss
-        loss = 0.0
+        loss = []
         for key in f_input.keys():
             if key in feature_layers:
                 loss_ = torch.nn.functional.mse_loss(f_input[key], f_target[key], reduction='none')
-                loss += torch.mean(loss_, dim=(1, 2, 3))
+                loss.append(torch.mean(loss_, dim=(1, 2, 3)))
+        loss = torch.stack(loss)
+        loss = torch.sum(loss, 0)
 
         return loss
 
@@ -147,21 +160,26 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
         super(YOLOV8PerceptualLoss, self).__init__()
         # Create model
         self.model = YOLO('pretrained/yolov8m.pt')
+        self.model = self.model.model
+        for p in self.model.parameters():
+            p.requires_grad = True
+        self.model.model.eval()
+
+    def disable_gradients(self):
         for p in self.model.parameters():
             p.requires_grad = False
-        self.model.model.model.eval()
 
     def get_features(self, input, layers=[0, 3, 7]):
         y = []
         features = []
-        for i, m in enumerate(self.model.model.model):
+        for i, m in enumerate(self.model.model):
             if m.f != -1:  # if not from previous layer
                 input = y[m.f] if isinstance(m.f, int) else [input if j == -1 else y[j] for j in
                                                              m.f]  # from earlier layers
             input = m(input)  # run
             if i in layers:
                 features.append(input)
-            y.append(input if m.i in self.model.model.save else None)  # save output
+            y.append(input if m.i in self.model.save else None)  # save output
             if len(features) == len(layers):
                 break
         return features
@@ -189,9 +207,11 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
         f_target = self.get_features(target_padded)
 
         # Calculate loss
-        loss = 0.0
+        loss = []
         for index in range(len(f_input)):
             loss_ = torch.nn.functional.mse_loss(f_input[index], f_target[index], reduction='none')
-            loss += torch.mean(loss_, dim=(1, 2, 3))
+            loss.append(torch.mean(loss_, dim=(1, 2, 3)))
+        loss = torch.stack(loss)
+        loss = torch.sum(loss, 0)
 
         return loss

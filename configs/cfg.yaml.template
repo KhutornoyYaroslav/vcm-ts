@@ -25,6 +25,7 @@ MODEL:
 OUTPUT_DIR: outputs/test
 SOLVER:
   LAMBDAS: [85, 170, 380, 840]
+  PL_MODEL: vgg
   PL_LAMBDA: 1.0
   DIST_LAMBDA: 1.0
   LR: 0.0001
