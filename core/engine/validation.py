@@ -113,7 +113,7 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
     if object_detection_loader is not None and stage >= cfg.DATASET.OD_STAGE:
         if (isinstance(perceptual_loss, FasterRCNNFPNPerceptualLoss) or
                 isinstance(perceptual_loss, FasterRCNNPerceptualLoss)):
-            detector = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
+            detector = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(min_size=1088, max_size=1920)
             detector.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
             detector.cuda()
             detector.eval()

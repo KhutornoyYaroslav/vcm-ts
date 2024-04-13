@@ -51,8 +51,10 @@ class VGGPerceptualLoss(torch.nn.Module):
 
 
 class FasterRCNNPerceptualLoss(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, resize=True):
         super(FasterRCNNPerceptualLoss, self).__init__()
+        self.transform = torch.nn.functional.interpolate
+        self.resize = resize
         # Create model
         self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
         self.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
@@ -79,6 +81,10 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
         input = input.clamp(0, 1)
         target = target.clamp(0, 1)
 
+        if self.resize:
+            input = self.transform(input, mode='bilinear', size=(224, 224), align_corners=False)
+            target = self.transform(target, mode='bilinear', size=(224, 224), align_corners=False)
+
         # Calculate features
         f_input = self.features.forward(input)
         f_target = self.features.forward(target)
@@ -94,8 +100,10 @@ class FasterRCNNPerceptualLoss(torch.nn.Module):
 
 
 class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, resize=True):
         super(FasterRCNNFPNPerceptualLoss, self).__init__()
+        self.transform = torch.nn.functional.interpolate
+        self.resize = resize
         # Create model
         self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
         self.model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
@@ -108,13 +116,17 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
             p.requires_grad = False
         self.features.eval()
 
-    def forward(self, target, input, feature_layers=['1']):  # ['0', '1', '2', '3', 'pool']
+    def forward(self, target, input, feature_layers=['0', '1', '2', '3', 'pool']):  # ['0', '1', '2', '3', 'pool']
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)
 
         input = input.clamp(0, 1)
         target = target.clamp(0, 1)
+
+        if self.resize:
+            input = self.transform(input, mode='bilinear', size=(224, 224), align_corners=False)
+            target = self.transform(target, mode='bilinear', size=(224, 224), align_corners=False)
 
         # Calculate features
         f_input = self.features.forward(input)

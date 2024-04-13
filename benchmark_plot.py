@@ -544,7 +544,8 @@ def main():
 
     print('Reading dataset')
     pretrained_weights = torchvision.models.detection.FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1
-    rcnn = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=pretrained_weights)
+    rcnn = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=pretrained_weights,
+                                                                   min_size=1088, max_size=1920)
     rcnn = rcnn.to(config["device"])
     rcnn.eval()
 
