@@ -175,7 +175,7 @@ def init_model(cfg, logger, arguments):
     model = build_model(cfg).cuda()
     local_rank = int(os.environ['LOCAL_RANK'])
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
 
     # Create optimizer
     num_gpus = int(os.environ['WORLD_SIZE'])
