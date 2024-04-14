@@ -255,8 +255,8 @@ def cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
     loss_to_opt.backward()
     optimizer.step()
 
-    # rank = int(os.environ["RANK"])
-    # print(f'Final ({rank}) {t_i}: {model.module.dmc.mv_encoder[6].weight.grad[0, 0]}')
+    rank = int(os.environ["RANK"])
+    print(f'Final ({rank}) {t_i}: {model.module.dmc.mv_encoder[6].weight.grad[0, 0]}')
 
     outputs['rate'].append(result['rate'])  # (N)
     outputs['dist'].append(result['dist'])  # (N)
