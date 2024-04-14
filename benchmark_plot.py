@@ -113,11 +113,14 @@ def read_dataset(config,
     dataset = {}
     metadata = os.path.join(config["dataset_dir"], "metadata.txt")
     classes = []
+    class_names = []
     with open(metadata) as f:
         for line in f.readlines():
             elements = line.split(': ')
             classes.append(int(elements[0]))
+            class_names.append(elements[1].strip())
     dataset['classes'] = classes
+    dataset['class_names'] = class_names
 
     sequences = config["sequences"]
     for sequence in sequences:
@@ -275,7 +278,7 @@ def calculate_ocr_metrics(dataset_annotations, annotations):
 
 
 def calculate_mean_ap(annotations, dataset, video_name):
-    metric_map = MeanAveragePrecision()
+    metric_map = MeanAveragePrecision(class_metrics=True)
     mean_ap = {}
     for model in annotations.keys():
         if len(annotations[model]) == 0:
@@ -289,10 +292,14 @@ def calculate_mean_ap(annotations, dataset, video_name):
             dataset_annotations = dataset[video_name]['annotations']['license_detection']
         else:
             raise RuntimeError("Invalid model type for calculate metrics")
+        mean_ap[model] = {}
         metric_map.update(annotations[model], dataset_annotations)
         map_metrics = metric_map.compute()
+        for class_mean_ap, class_id in zip(map_metrics['map_per_class'], map_metrics['classes']):
+            class_name = dataset['class_names'][dataset['classes'].index(class_id)]
+            mean_ap[model][class_name] = class_mean_ap.item() * 100
         model_mean_ap = map_metrics['map_50'].item()
-        mean_ap[model] = model_mean_ap * 100
+        mean_ap[model]['map_50'] = model_mean_ap * 100
 
     return mean_ap
 
@@ -438,7 +445,7 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
         detection_models = sorted(list(metrics[codecs[0]][video][0]['mean_ap'].keys()))
         for detection_model in detection_models:
             plt.figure(figsize=(16, 9))
-            orig_map = dataset[video]['mean_ap'][detection_model]
+            orig_map = dataset[video]['mean_ap'][detection_model]['map_50']
             map_loss_1 = orig_map - 1
             map_loss_2 = orig_map - 2
             plt.axhline(y=orig_map, color='k', linestyle='dashed',
@@ -447,7 +454,7 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label='2% mAP loss')
             for codec in codecs:
                 bpps = [info['bpp'] for info in metrics[codec][video]]
-                maps = [info['mean_ap'][detection_model] for info in metrics[codec][video]]
+                maps = [info['mean_ap'][detection_model]['map_50'] for info in metrics[codec][video]]
                 x = np.array(bpps)
                 y = np.array(maps)
                 plt.plot(x, y, 'o-', label=codec)
@@ -457,7 +464,30 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.xlabel('bpp')
             plt.ylabel('mAP@0.5 (%)')
             plt.savefig(os.path.join(out_path, f"detection_model_{detection_model}_{video}.png"))
-            plt.show()
+
+            class_names = sorted(list(metrics[codecs[0]][video][0]['mean_ap'][detection_model].keys()))
+            class_names.remove('map_50')
+            for class_name in class_names:
+                plt.figure(figsize=(16, 9))
+                orig_map = dataset[video]['mean_ap'][detection_model][class_name]
+                map_loss_1 = orig_map - 1
+                map_loss_2 = orig_map - 2
+                plt.axhline(y=orig_map, color='k', linestyle='dashed',
+                            label=f'Original performance ({orig_map:.2f}%)')
+                plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label='1% mAP loss')
+                plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label='2% mAP loss')
+                for codec in codecs:
+                    bpps = [info['bpp'] for info in metrics[codec][video]]
+                    maps = [info['mean_ap'][detection_model][class_name] for info in metrics[codec][video]]
+                    x = np.array(bpps)
+                    y = np.array(maps)
+                    plt.plot(x, y, 'o-', label=codec)
+                plt.legend()
+                plt.grid()
+                plt.title(f'Object detection performance for class {class_name} on {detection_model} for {video}')
+                plt.xlabel('bpp')
+                plt.ylabel('mAP (%)')
+                plt.savefig(os.path.join(out_path, f"detection_model_{class_name}_{detection_model}_{video}.png"))
 
         matchers = sorted(list(metrics[codecs[0]][video][0]['ocr_results'].keys()))
         for matcher in matchers:
@@ -474,7 +504,6 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.xlabel('bpp')
             plt.ylabel('Metric value, %')
             plt.savefig(os.path.join(out_path, f"text_match_{matcher}_{video}.png"))
-            plt.show()
 
         plt.figure(figsize=(16, 9))
         for codec in codecs:
@@ -489,7 +518,6 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
         plt.xlabel('bpp')
         plt.ylabel('PSNR (db)')
         plt.savefig(os.path.join(out_path, f"psnr_{video}.png"))
-        plt.show()
 
         if use_ms_ssim:
             plt.figure(figsize=(16, 9))
@@ -505,7 +533,6 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.xlabel('bpp')
             plt.ylabel('MS-SSIM')
             plt.savefig(os.path.join(out_path, f"ms-ssim_{video}.png"))
-            plt.show()
 
         for codec in codecs:
             plot_flag = True
@@ -529,7 +556,6 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 plt.xlabel('frame')
                 plt.ylabel('bpp')
                 plt.savefig(os.path.join(out_path, f"bpp_{codec}_{video}.png"))
-                plt.show()
 
 
 def main():
