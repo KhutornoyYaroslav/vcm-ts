@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 
 import numpy as np
@@ -154,7 +155,8 @@ def get_stage_params(cfg,
         raise SystemError('Invalid loss rate')
 
     # Learning rate
-    optimizer.param_groups[0]["lr"] = float(stage_params[5])
+    world_size = int(os.environ['WORLD_SIZE'])
+    optimizer.param_groups[0]["lr"] = float(stage_params[5]) * math.sqrt(world_size)
 
     # Perceptual loss
     if stage_params[7] == 'true':
