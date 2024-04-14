@@ -172,7 +172,7 @@ def init_model(cfg, logger, arguments):
     # Create model
     model = build_model(cfg).cuda()
     local_rank = int(os.environ['LOCAL_RANK'])
-    # model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
 
     # Create optimizer

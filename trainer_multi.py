@@ -82,6 +82,7 @@ def main():
     torch.manual_seed(1)
     if torch.cuda.is_available():
         torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.enabled = False
 
     # Create config
     cfg.merge_from_file(args.config_file)
