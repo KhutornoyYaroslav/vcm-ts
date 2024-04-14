@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from DCVC_HEM.src.models.video_model import DMC
+from core.engine.losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss, YOLOV8PerceptualLoss
 
 
 class DCVC_HEM(nn.Module):
@@ -17,6 +18,7 @@ class DCVC_HEM(nn.Module):
         self.pl_lambda.requires_grad = False
         self.dist_lambda = torch.tensor(cfg.SOLVER.DIST_LAMBDA).cuda()
         self.dist_lambda.requires_grad = False
+        self.perceptual_loss = self.get_perceptual_loss(cfg)
 
         self.inter_modules_dist = [
             self.dmc.bit_estimator_z_mv,
@@ -53,6 +55,21 @@ class DCVC_HEM(nn.Module):
         # feature_adaptor_I                 +
         # feature_adaptor_P                 +
         # feature_extractor                 +
+
+    def get_perceptual_loss(this, cfg):
+        if cfg.SOLVER.PL_MODEL == 'vgg':
+            perceptual_loss = VGGPerceptualLoss()
+        elif cfg.SOLVER.PL_MODEL == 'rcnn':
+            perceptual_loss = FasterRCNNFPNPerceptualLoss()
+        elif cfg.SOLVER.PL_MODEL == 'yolo':
+            perceptual_loss = YOLOV8PerceptualLoss()
+        else:
+            raise SystemError('Invalid perceptual loss')
+
+        perceptual_loss.disable_gradients()
+        perceptual_loss.cuda()
+        perceptual_loss.eval()
+        return perceptual_loss
 
     def activate_modules_inter_dist(self):
         for p in self.dmc.parameters():
@@ -105,7 +122,7 @@ class DCVC_HEM(nn.Module):
                        loss_dist_key: str,
                        loss_rate_keys: List[str],
                        p_frames: int,
-                       perceptual_loss: nn.Module,
+                       perceptual_loss: bool,
                        is_train=True,
                        i_frame_net=None,
                        i_frame_q_scales=None):
@@ -125,8 +142,8 @@ class DCVC_HEM(nn.Module):
                 Loss rate keys for output dictionary
             p_frames: int
                 Number of p-frames
-            perceptual_loss: nn.Module
-                Perceptual loss model
+            perceptual_loss: bool
+                Perceptual loss usage
             is_train: bool
                 Train or eval mode
         """
@@ -194,8 +211,8 @@ class DCVC_HEM(nn.Module):
                 assert loss_dist_key in output
                 dist = output[loss_dist_key]
 
-                if perceptual_loss is not None:
-                    perceptual_dist = perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                if perceptual_loss:
+                    perceptual_dist = self.perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -243,7 +260,7 @@ class DCVC_HEM(nn.Module):
                              loss_dist_key: str,
                              loss_rate_keys: List[str],
                              dpb,
-                             perceptual_loss: nn.Module):
+                             perceptual_loss: bool):
         """
         Implements single stage training strategy (I -> P frames).
         See: https://arxiv.org/pdf/2111.13850v1.pdf
@@ -258,8 +275,8 @@ class DCVC_HEM(nn.Module):
                 Loss rate keys for output dictionary
             dpb: dict
                 Decoded picture buffer
-            perceptual_loss: nn.Module
-                Perceptual loss model
+            perceptual_loss: bool
+                Perceptual loss usage
         """
         n, c, h, w = input.shape
         assert self.lambdas.shape[0] == n
@@ -282,8 +299,8 @@ class DCVC_HEM(nn.Module):
         assert loss_dist_key in output
         dist = output[loss_dist_key]
 
-        if perceptual_loss is not None:
-            perceptual_dist = perceptual_loss(input, output['dpb']['ref_frame'])
+        if perceptual_loss:
+            perceptual_dist = self.perceptual_loss(input, output['dpb']['ref_frame'])
         else:
             perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -309,7 +326,7 @@ class DCVC_HEM(nn.Module):
                         loss_dist_key: str,
                         loss_rate_keys: List[str],
                         p_frames: int,
-                        perceptual_loss: nn.Module,
+                        perceptual_loss: bool,
                         is_train=True,
                         i_frame_net=None,
                         i_frame_q_scales=None):
@@ -329,8 +346,8 @@ class DCVC_HEM(nn.Module):
                 Loss rate keys for output dictionary
             p_frames: int
                 Number of p-frames
-            perceptual_loss: nn.Module
-                Perceptual loss model
+            perceptual_loss: bool
+                Perceptual loss usage
             is_train: bool
                 Train or eval mode
         """
@@ -400,8 +417,8 @@ class DCVC_HEM(nn.Module):
                 assert loss_dist_key in output
                 dist = output[loss_dist_key]
 
-                if perceptual_loss is not None:
-                    perceptual_dist = perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                if perceptual_loss:
+                    perceptual_dist = self.perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -460,7 +477,7 @@ class DCVC_HEM(nn.Module):
                               dpb,
                               p_frames: int,
                               t_i: int,
-                              perceptual_loss: nn.Module):
+                              perceptual_loss: bool):
         """
         Implements cascaded loss training strategy (avg loss).
         See: https://arxiv.org/pdf/2111.13850v1.pdf
@@ -479,8 +496,8 @@ class DCVC_HEM(nn.Module):
                 Number of p-frames
             t_i: int
                 Subsequence index
-            perceptual_loss: nn.Module
-                Perceptual loss model
+            perceptual_loss: bool
+                Perceptual loss usage
         """
         n, t, c, h, w = input.shape
         assert self.lambdas.shape[0] == n
@@ -514,8 +531,8 @@ class DCVC_HEM(nn.Module):
             assert loss_dist_key in output
             dist = output[loss_dist_key]
 
-            if perceptual_loss is not None:
-                perceptual_dist = perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+            if perceptual_loss:
+                perceptual_dist = self.perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
             else:
                 perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -575,7 +592,7 @@ class DCVC_HEM(nn.Module):
                 loss_dist_key: str = None,
                 loss_rate_keys: List[str] = None,
                 p_frames: int = None,
-                perceptual_loss: nn.Module = None,
+                perceptual_loss: bool = None,
                 optimizer: torch.optim.Optimizer = None,
                 is_train=True,
                 dpb=None,

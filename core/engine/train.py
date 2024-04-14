@@ -12,7 +12,6 @@ from DCVC_HEM.src.utils.stream_helper import get_state_dict
 from core.data import make_data_loader, make_object_detection_data_loader
 from core.utils import dist_util
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
-from .losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss, YOLOV8PerceptualLoss
 from .validation import eval_dataset
 
 
@@ -45,28 +44,10 @@ def calc_max_epoch(cfg):
     return epoch_counter
 
 
-def get_perceptual_loss(cfg):
-    if cfg.SOLVER.PL_MODEL == 'vgg':
-        perceptual_loss = VGGPerceptualLoss()
-    elif cfg.SOLVER.PL_MODEL == 'rcnn':
-        perceptual_loss = FasterRCNNFPNPerceptualLoss()
-    elif cfg.SOLVER.PL_MODEL == 'yolo':
-        perceptual_loss = YOLOV8PerceptualLoss()
-    else:
-        raise SystemError('Invalid perceptual loss')
-
-    if perceptual_loss is not None:
-        perceptual_loss.disable_gradients()
-        perceptual_loss.cuda()
-        perceptual_loss.eval()
-    return perceptual_loss
-
-
 def get_stage_params(cfg,
                      model: torch.nn.Module,
                      optimizer: torch.optim.Optimizer,
-                     epoch: int,
-                     perceptual_loss: torch.nn.Module):
+                     epoch: int):
     """
     Evaluates parameters of current training stage.
     List of parameters from configuration file for each stage:
@@ -88,8 +69,6 @@ def get_stage_params(cfg,
             Optimizer to update model parameters. Need to change learning rate.
         epoch : int
             Current epoch.
-        perceptual_loss : torch.nn.Module
-            Perceptual loss model.
 
     Returns:
         params : dict
@@ -170,9 +149,9 @@ def get_stage_params(cfg,
 
     # Perceptual loss
     if stage_params[7] == 'true':
-        perceptual_loss = perceptual_loss
+        perceptual_loss = True
     elif stage_params[7] == 'false':
-        perceptual_loss = None
+        perceptual_loss = False
     else:
         raise SystemError('Invalid perceptual loss usage (true or false)')
     result['perceptual_loss'] = perceptual_loss
@@ -197,9 +176,7 @@ def do_train(cfg,
 
     # Set model to train mode
     model.train()
-
-    # Perceptual loss
-    perceptual_loss = get_perceptual_loss(cfg)
+    model.perceptual_loss.eval()
 
     # Create tensorboard writer
     save_to_disk = dist_util.is_main_process()
@@ -263,7 +240,7 @@ def do_train(cfg,
         best_samples = [[] for _ in range(len(cfg.SOLVER.LAMBDAS))]
         worst_samples = [[] for _ in range(len(cfg.SOLVER.LAMBDAS))]
 
-        stage_params = get_stage_params(cfg, model, optimizer, epoch, perceptual_loss)
+        stage_params = get_stage_params(cfg, model, optimizer, epoch)
 
         total_iterations = 0
         for iteration, data_entry in pbar:
@@ -358,6 +335,7 @@ def do_train(cfg,
             add_metrics(cfg, summary_writer, result_dict, global_step, is_train=False)
 
             model.train()
+            model.perceptual_loss.eval()
 
         # Save epoch results
         if epoch % args.save_step == 0:

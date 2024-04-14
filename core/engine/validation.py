@@ -63,7 +63,7 @@ def delete_unsupported_annotations(annotations, classes):
 
 
 def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                 object_detection_loader=None, stage=0, perceptual_loss=None, i_frame_net=None, i_frame_q_scales=None):
+                 object_detection_loader=None, stage=0, perceptual_loss=False, i_frame_net=None, i_frame_q_scales=None):
     logger = logging.getLogger("CORE.inference")
 
     # Iteration loop
@@ -111,8 +111,8 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
         add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
 
     if object_detection_loader is not None and stage >= cfg.DATASET.OD_STAGE:
-        if (isinstance(perceptual_loss, FasterRCNNFPNPerceptualLoss) or
-                isinstance(perceptual_loss, FasterRCNNPerceptualLoss)):
+        if (isinstance(model.perceptual_loss, FasterRCNNFPNPerceptualLoss) or
+                isinstance(model.perceptual_loss, FasterRCNNPerceptualLoss)):
             detector = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(min_size=1088, max_size=1920)
             detector.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
             detector.cuda()
@@ -163,8 +163,8 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
                 for i in range(n):
                     input_to_detect = dpb[i]["ref_frame"]  # (N, C, H, W)
                     input_to_detect = input_to_detect.clamp(0, 1)
-                    if (isinstance(perceptual_loss, FasterRCNNFPNPerceptualLoss) or
-                            isinstance(perceptual_loss, FasterRCNNPerceptualLoss)):
+                    if (isinstance(model.perceptual_loss, FasterRCNNFPNPerceptualLoss) or
+                            isinstance(model.perceptual_loss, FasterRCNNPerceptualLoss)):
                         output = forward_rcnn(detector, input_to_detect)
                     else:
                         output = forward_yolo(detector, input_to_detect)
