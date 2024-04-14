@@ -173,7 +173,7 @@ def init_model(cfg, logger, arguments):
     model = build_model(cfg).cuda()
     local_rank = int(os.environ['LOCAL_RANK'])
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
 
     # Create optimizer
     num_gpus = int(os.environ['WORLD_SIZE'])
@@ -255,8 +255,8 @@ def cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
     loss_to_opt.backward()
     optimizer.step()
 
-    rank = int(os.environ["RANK"])
-    print(f'Final ({rank}) {t_i}: {model.module.dmc.mv_encoder[6].weight.grad[0, 0]}')
+    # rank = int(os.environ["RANK"])
+    # print(f'Final ({rank}) {t_i}: {model.module.dmc.mv_encoder[6].weight.grad[0, 0]}')
 
     outputs['rate'].append(result['rate'])  # (N)
     outputs['dist'].append(result['dist'])  # (N)
