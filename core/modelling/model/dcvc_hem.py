@@ -1,10 +1,11 @@
 from typing import List
 
+import lpips
 import torch
 from torch import nn
 
 from DCVC_HEM.src.models.video_model import DMC
-from core.engine.losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss, YOLOV8PerceptualLoss
+from core.engine.losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss, YOLOV8PerceptualLoss, LPIPSPerceptualLoss
 
 
 class DCVC_HEM(nn.Module):
@@ -63,6 +64,10 @@ class DCVC_HEM(nn.Module):
             perceptual_loss = FasterRCNNFPNPerceptualLoss()
         elif cfg.SOLVER.PL_MODEL == 'yolo':
             perceptual_loss = YOLOV8PerceptualLoss()
+        elif cfg.SOLVER.PL_MODEL == 'lpips_linear':
+            perceptual_loss = LPIPSPerceptualLoss(use_lpips=True, use_dropout=True)
+        elif cfg.SOLVER.PL_MODEL == 'lpips_no_linear':
+            perceptual_loss = LPIPSPerceptualLoss(use_lpips=False, use_dropout=False)
         else:
             raise SystemError('Invalid perceptual loss')
 

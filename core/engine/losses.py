@@ -1,5 +1,6 @@
 import torch
 import torchvision
+from lpips import lpips
 from torchvision.models.feature_extraction import create_feature_extractor
 from ultralytics import YOLO
 
@@ -215,3 +216,22 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
         loss = torch.sum(loss, 0)
 
         return loss
+
+
+class LPIPSPerceptualLoss(torch.nn.Module):
+    def __init__(self, use_lpips=True, use_dropout=True):
+        super(LPIPSPerceptualLoss, self).__init__()
+        self.lpips = lpips.LPIPS(net='vgg', lpips=use_lpips, use_dropout=use_dropout, verbose=False)
+
+    def disable_gradients(self):
+        for p in self.lpips.parameters():
+            p.requires_grad = False
+
+    def forward(self, target, input):
+        input = input.clamp(0, 1)
+        target = target.clamp(0, 1)
+
+        loss = self.lpips(target, input, normalize=True)
+        loss = torch.squeeze(loss)
+
+        return loss  # (N)
