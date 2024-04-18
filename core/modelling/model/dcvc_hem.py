@@ -123,6 +123,7 @@ class DCVC_HEM(nn.Module):
 
     def forward_single(self,
                        input: torch.Tensor,
+                       target: torch.Tensor,
                        optimizer: torch.optim.Optimizer,
                        loss_dist_key: str,
                        loss_rate_keys: List[str],
@@ -138,6 +139,9 @@ class DCVC_HEM(nn.Module):
         Parameters:
             input : tensor
                 Video sequences data with shape (N, T, C, H, W).
+                N is equal to number of global quantization steps.
+            target : tensor
+                Target video sequences data with shape (N, T, C, H, W).
                 N is equal to number of global quantization steps.
             optimizer : torch.optim.Optimizer
                 Optimizer to train model.
@@ -193,7 +197,7 @@ class DCVC_HEM(nn.Module):
 
             input_seqs = []
             decod_seqs = []
-            input_seqs.append(input[:, t_i])
+            input_seqs.append(target[:, t_i])
             decod_seqs.append(input[:, t_i])
 
             loss_list = []
@@ -217,7 +221,7 @@ class DCVC_HEM(nn.Module):
                 dist = output[loss_dist_key]
 
                 if perceptual_loss:
-                    perceptual_dist = self.perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -238,7 +242,7 @@ class DCVC_HEM(nn.Module):
                 result['p_dist'].append(perceptual_dist)  # (N)
                 result['loss'].append(loss)  # (N)
                 result['single_forwards'] += 1
-                input_seqs.append(input[:, t_i + 1 + p_idx])
+                input_seqs.append(target[:, t_i + 1 + p_idx])
                 decod_seqs.append(dpb["ref_frame"])
 
             loss_seq = torch.stack(loss_list, -1)  # (N, p_frames)
@@ -262,6 +266,7 @@ class DCVC_HEM(nn.Module):
 
     def forward_single_multi(self,
                              input: torch.Tensor,
+                             target: torch.Tensor,
                              loss_dist_key: str,
                              loss_rate_keys: List[str],
                              dpb,
@@ -273,6 +278,9 @@ class DCVC_HEM(nn.Module):
         Parameters:
             input : tensor
                 Video sequences data with shape (N, T, C, H, W).
+                N is equal to number of global quantization steps.
+            target : tensor
+                Target video sequences data with shape (N, T, C, H, W).
                 N is equal to number of global quantization steps.
             loss_dist_key: str
                 Loss dist key for output dictionary
@@ -305,7 +313,7 @@ class DCVC_HEM(nn.Module):
         dist = output[loss_dist_key]
 
         if perceptual_loss:
-            perceptual_dist = self.perceptual_loss(input, output['dpb']['ref_frame'])
+            perceptual_dist = self.perceptual_loss(target, output['dpb']['ref_frame'])
         else:
             perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -318,7 +326,7 @@ class DCVC_HEM(nn.Module):
             "p_dist": perceptual_dist,  # (N)
             "loss": loss,  # (N)
             "loss_to_opt": loss_to_opt,  # (1)
-            "input_seqs": input,  # (N, p_frame)
+            "input_seqs": target,  # (N, p_frame)
             "decod_seqs": dpb["ref_frame"],  # (N, p_frame)
             "dpb": dpb
         }
@@ -327,6 +335,7 @@ class DCVC_HEM(nn.Module):
 
     def forward_cascade(self,
                         input: torch.Tensor,
+                        target: torch.Tensor,
                         optimizer: torch.optim.Optimizer,
                         loss_dist_key: str,
                         loss_rate_keys: List[str],
@@ -342,6 +351,9 @@ class DCVC_HEM(nn.Module):
         Parameters:
             input : tensor
                 Video sequences data with shape (N, T, C, H, W).
+                N is equal to number of global quantization steps.
+            target : tensor
+                Target video sequences data with shape (N, T, C, H, W).
                 N is equal to number of global quantization steps.
             optimizer : torch.optim.Optimizer
                 Optimizer to train model.
@@ -397,7 +409,7 @@ class DCVC_HEM(nn.Module):
 
             input_seqs = []
             decod_seqs = []
-            input_seqs.append(input[:, t_i])
+            input_seqs.append(target[:, t_i])
             decod_seqs.append(input[:, t_i])
 
             rate_list = []
@@ -423,7 +435,7 @@ class DCVC_HEM(nn.Module):
                 dist = output[loss_dist_key]
 
                 if perceptual_loss:
-                    perceptual_dist = self.perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -431,7 +443,7 @@ class DCVC_HEM(nn.Module):
                 dist_list.append(dist)
                 p_dist_list.append(perceptual_dist)
                 loss_list.append(rate + lambdas * (dist * self.dist_lambda + perceptual_dist * self.pl_lambda))
-                input_seqs.append(input[:, t_i + 1 + p_idx])
+                input_seqs.append(target[:, t_i + 1 + p_idx])
                 decod_seqs.append(dpb["ref_frame"])
 
             rate = torch.stack(rate_list, -1)  # (N, p_frames)
@@ -477,6 +489,7 @@ class DCVC_HEM(nn.Module):
 
     def forward_cascade_multi(self,
                               input: torch.Tensor,
+                              target: torch.Tensor,
                               loss_dist_key: str,
                               loss_rate_keys: List[str],
                               dpb,
@@ -490,6 +503,9 @@ class DCVC_HEM(nn.Module):
         Parameters:
             input : tensor
                 Video sequences data with shape (N, T, C, H, W).
+                N is equal to number of global quantization steps.
+            target : tensor
+                Target video sequences data with shape (N, T, C, H, W).
                 N is equal to number of global quantization steps.
             loss_dist_key: str
                 Loss dist key for output dictionary
@@ -511,7 +527,7 @@ class DCVC_HEM(nn.Module):
 
         input_seqs = []
         decod_seqs = []
-        input_seqs.append(input[:, t_i])
+        input_seqs.append(target[:, t_i])
         decod_seqs.append(input[:, t_i])
 
         rate_list = []
@@ -537,7 +553,7 @@ class DCVC_HEM(nn.Module):
             dist = output[loss_dist_key]
 
             if perceptual_loss:
-                perceptual_dist = self.perceptual_loss(input[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
             else:
                 perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -545,7 +561,7 @@ class DCVC_HEM(nn.Module):
             dist_list.append(dist)
             p_dist_list.append(perceptual_dist)
             loss_list.append(rate + lambdas * (dist * self.dist_lambda + perceptual_dist * self.pl_lambda))
-            input_seqs.append(input[:, t_i + 1 + p_idx])
+            input_seqs.append(target[:, t_i + 1 + p_idx])
             decod_seqs.append(dpb["ref_frame"])
 
         rate = torch.stack(rate_list, -1)  # (N, p_frames)
@@ -594,6 +610,7 @@ class DCVC_HEM(nn.Module):
     def forward(self,
                 forward_method: str,
                 input: torch.Tensor,
+                target: torch.Tensor = None,
                 loss_dist_key: str = None,
                 loss_rate_keys: List[str] = None,
                 p_frames: int = None,
@@ -605,15 +622,15 @@ class DCVC_HEM(nn.Module):
                 i_frame_net=None,
                 i_frame_q_scales=None):
         if forward_method == 'single':
-            return self.forward_single(input, optimizer, loss_dist_key, loss_rate_keys, p_frames,
+            return self.forward_single(input, target, optimizer, loss_dist_key, loss_rate_keys, p_frames,
                                        perceptual_loss, is_train, i_frame_net, i_frame_q_scales)
         elif forward_method == 'single_multi':
-            return self.forward_single_multi(input, loss_dist_key, loss_rate_keys, dpb, perceptual_loss)
+            return self.forward_single_multi(input, target, loss_dist_key, loss_rate_keys, dpb, perceptual_loss)
         elif forward_method == 'cascade':
-            return self.forward_cascade(input, optimizer, loss_dist_key, loss_rate_keys, p_frames,
+            return self.forward_cascade(input, target, optimizer, loss_dist_key, loss_rate_keys, p_frames,
                                         perceptual_loss, is_train, i_frame_net, i_frame_q_scales)
         elif forward_method == 'cascade_multi':
-            return self.forward_cascade_multi(input, loss_dist_key, loss_rate_keys, dpb, p_frames, t_i,
+            return self.forward_cascade_multi(input, target, loss_dist_key, loss_rate_keys, dpb, p_frames, t_i,
                                               perceptual_loss)
         elif forward_method == 'forward_simple':
             return self.forward_simple(input, dpb)

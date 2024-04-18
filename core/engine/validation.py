@@ -83,16 +83,18 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
     best_samples = [[] for _ in range(n)]
     worst_samples = [[] for _ in range(n)]
     for data_entry in tqdm(data_loader):
-        input, _ = data_entry  # (N, T, C, H, W)
+        input, target = data_entry  # (N, T, C, H, W)
 
         # Forward images
         with torch.no_grad():
             # Forward data to GPU
             input = input.cuda()
+            target = target.cuda()
 
             # Do prediction
             outputs = model(forward_method,
                             input,
+                            target,
                             loss_dist_key,
                             loss_rate_keys,
                             p_frames=p_frames,

@@ -247,12 +247,14 @@ def do_train(cfg,
             global_step = epoch * iters_per_epoch + iteration
 
             # Get data
-            input, _ = data_entry  # (N, T, C, H, W)
+            input, target = data_entry  # (N, T, C, H, W)
             input = input.cuda()
+            target = target.cuda()
 
             # Optimize model
             outputs = model(stage_params['forward_method'],
                             input,
+                            target,
                             stage_params['loss_dist_key'],
                             stage_params['loss_rate_keys'],
                             stage_params['p_frames'],

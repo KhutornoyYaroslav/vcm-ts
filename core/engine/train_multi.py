@@ -199,10 +199,10 @@ def reinit_model(model, optimizer, checkpointer, cfg, logger, arguments):
     return init_model(cfg, logger, arguments)
 
 
-def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
+def single_step(input, target, model, stage_params, dpb, optimizer, t_i, outputs):
     input_seqs = []
     decod_seqs = []
-    input_seqs.append(input[:, t_i])
+    input_seqs.append(target[:, t_i])
     decod_seqs.append(input[:, t_i])
 
     loss_list = []
@@ -212,6 +212,7 @@ def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
         optimizer.zero_grad()
         result = model(stage_params['forward_method'],
                        input[:, t_i + 1 + p_idx],
+                       target[:, t_i + 1 + p_idx],
                        stage_params['loss_dist_key'],
                        stage_params['loss_rate_keys'],
                        perceptual_loss=stage_params['perceptual_loss'],
@@ -243,10 +244,11 @@ def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
     outputs['decod_seqs'].append(torch.stack(decod_seqs, -1))  # (N, p_frames + 1)
 
 
-def cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
+def cascade_step(input, target, model, stage_params, dpb, optimizer, t_i, outputs):
     optimizer.zero_grad()
     result = model(stage_params['forward_method'],
                    input,
+                   target,
                    stage_params['loss_dist_key'],
                    stage_params['loss_rate_keys'],
                    perceptual_loss=stage_params['perceptual_loss'],
@@ -366,8 +368,9 @@ def do_train(cfg,
             global_step = epoch * iters_per_epoch + iteration * args.num_gpus
 
             # Get data
-            input, _ = data_entry  # (N, T, C, H, W)
+            input, target = data_entry  # (N, T, C, H, W)
             input = input.cuda()
+            target = target.cuda()
 
             # if iteration == 0:
             #     rank = int(os.environ["RANK"])
@@ -420,9 +423,9 @@ def do_train(cfg,
                     }
 
                 if stage_params['forward_method'] == 'single_multi':
-                    single_step(input, model, stage_params, dpb, optimizer, t_i, outputs)
+                    single_step(input, target, model, stage_params, dpb, optimizer, t_i, outputs)
                 elif stage_params['forward_method'] == 'cascade_multi':
-                    cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs)
+                    cascade_step(input, target, model, stage_params, dpb, optimizer, t_i, outputs)
 
             outputs['rate'] = torch.stack(outputs['rate'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
             outputs['dist'] = torch.stack(outputs['dist'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
