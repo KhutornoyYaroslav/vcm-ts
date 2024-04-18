@@ -1,6 +1,3 @@
-# Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
-
 import argparse
 import concurrent.futures
 import json
@@ -333,16 +330,18 @@ def video_to_frames(video_path: str, out_dir: str, gop: int, quality_index: int)
     cap.release()
 
 
-def encode_folder(src_files, out_path, framerate: int, crf: int = 0, preset: str = 'ultrafast'):
+def encode_folder(src_files, out_path, framerate: int, crf: int = 0, gop: int = 32, preset: str = 'ultrafast'):
     call([
         'ffmpeg',
         '-hide_banner',
+        '-pix_fmt', 'yuv420p',
         '-framerate', str(framerate),
         '-loglevel', 'error',
         '-i', src_files,
         '-c:v', 'libx265',
-        '-x265-params', 'crf=' + str(crf),
+        '-x265-params', 'crf=' + str(crf) + ':keyint=' + str(gop),
         '-preset', preset,
+        '-tune', 'zerolatency',
         '-f', 'hevc',
         '-y',
         out_path
@@ -371,7 +370,7 @@ def decod_hevc(dataset_dir: str,
 
         for index, crf in enumerate(crfs):
             out_filename_crf_custom = os.path.join(temp_dir, "crf_" + str(crf) + ".mp4")
-            encode_folder(frames_dir, out_filename_crf_custom, framerate=config['fps'], crf=crf,
+            encode_folder(frames_dir, out_filename_crf_custom, framerate=config['fps'], crf=crf, gop=gop,
                           preset=config['preset'])
             video_to_frames(out_filename_crf_custom, result_dir, gop, index)
 

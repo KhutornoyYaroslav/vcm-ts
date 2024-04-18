@@ -31,15 +31,15 @@
         "HEVC": [
             {
                 "name": "HEVC ultrafast",
-                "crf_start": 28,
-                "crf_end": 40,
+                "crf_start": 32,
+                "crf_end": 44,
                 "fps": 25,
                 "preset": "ultrafast"
             },
             {
                 "name": "HEVC veryslow",
                 "crf_start": 28,
-                "crf_end": 40,
+                "crf_end": 42,
                 "fps": 25,
                 "preset": "veryslow"
             }
