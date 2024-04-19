@@ -111,17 +111,6 @@ def read_dataset(config,
                  yolo_lp_detection,
                  device: str):
     dataset = {}
-    metadata = os.path.join(config["dataset_dir"], "metadata.txt")
-    classes = []
-    class_names = []
-    with open(metadata) as f:
-        for line in f.readlines():
-            elements = line.split(': ')
-            classes.append(int(elements[0]))
-            class_names.append(elements[1].strip())
-    dataset['classes'] = classes
-    dataset['class_names'] = class_names
-
     sequences = config["sequences"]
     for sequence in sequences:
         print(f'Sequence: {sequence["name"]}')
@@ -153,7 +142,18 @@ def read_dataset(config,
             image = image.to(device)
             images.append(image)
 
-        dataset[sequence["name"]] = dict(images=images, annotations=annotations)
+        metadata = os.path.join(sequence_path, "metadata.txt")
+        classes = []
+        class_names = []
+        with open(metadata) as f:
+            for line in f.readlines():
+                elements = line.split(': ')
+                classes.append(int(elements[0]))
+                class_names.append(elements[1].strip())
+        dataset[sequence["name"]] = dict(images=images,
+                                         annotations=annotations,
+                                         classes=classes,
+                                         class_names=class_names)
 
         annotation_types = annotations.keys()
         mean_ap = 0
@@ -163,6 +163,9 @@ def read_dataset(config,
                 'yolo_detection': [],
                 'yolo_lp_detection': []
             }
+            _, _, height, width = image.shape
+            rcnn.transform.min_size = (height,)
+            rcnn.transform.max_size = width
             for image in tqdm(images):
                 if "object_detection" in annotation_types:
                     rcnn_output = forward_rcnn(rcnn, image.cuda())
@@ -173,7 +176,7 @@ def read_dataset(config,
                     yolo_lp_detection_output = forward_yolo(yolo_lp_detection, image.cuda(), 0)
                     origin_annotations['yolo_lp_detection'].append(yolo_lp_detection_output)
 
-            delete_unsupported_annotations(origin_annotations, dataset['classes'])
+            delete_unsupported_annotations(origin_annotations, dataset[sequence["name"]]['classes'])
             mean_ap = calculate_mean_ap(origin_annotations, dataset, sequence["name"])
 
         dataset[sequence["name"]]["mean_ap"] = mean_ap
@@ -296,7 +299,7 @@ def calculate_mean_ap(annotations, dataset, video_name):
         metric_map.update(annotations[model], dataset_annotations)
         map_metrics = metric_map.compute()
         for class_mean_ap, class_id in zip(map_metrics['map_per_class'], map_metrics['classes']):
-            class_name = dataset['class_names'][dataset['classes'].index(class_id)]
+            class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
             mean_ap[model][class_name] = class_mean_ap.item() * 100
         model_mean_ap = map_metrics['map_50'].item()
         mean_ap[model]['map_50'] = model_mean_ap * 100
@@ -399,6 +402,9 @@ def get_metrics(decod_dir: str,
                     image = image.to(device)
 
                     if "object_detection" in annotation_types:
+                        _, _, height, width = image.shape
+                        rcnn.transform.min_size = (height,)
+                        rcnn.transform.max_size = width
                         rcnn_output = forward_rcnn(rcnn, image)
                         yolo_detection_output = forward_yolo(yolo_detection, image)
                         annotations['rcnn'].append(rcnn_output)
@@ -415,7 +421,7 @@ def get_metrics(decod_dir: str,
                     torch.cuda.empty_cache()
                     images.append(image)
 
-                delete_unsupported_annotations(annotations, dataset['classes'])
+                delete_unsupported_annotations(annotations, dataset[video_folder.name]['classes'])
 
                 print(f'\t\tCalculate metrics')
                 mean_ap, ocr_results, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name, use_ms_ssim)
