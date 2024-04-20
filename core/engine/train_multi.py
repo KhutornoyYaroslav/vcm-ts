@@ -332,10 +332,10 @@ def do_train(cfg,
         arguments["epoch"] = epoch + 1
 
         if current_stage != get_current_stage(cfg, epoch):
+            dist.barrier()
             model, optimizer, checkpointer = reinit_model(model, optimizer, checkpointer,
                                                           cfg, logger, arguments)
             current_stage = get_current_stage(cfg, epoch)
-            dist.barrier()
 
         # Create progress bar
         if dist_util.is_main_process():
