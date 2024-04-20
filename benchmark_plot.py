@@ -168,8 +168,8 @@ def read_dataset(config,
             rcnn.transform.max_size = width
             for image in tqdm(images):
                 if "object_detection" in annotation_types:
-                    rcnn_output = forward_rcnn(rcnn, image.cuda())
-                    yolo_detection_output = forward_yolo(yolo_detection, image.cuda())
+                    rcnn_output = forward_rcnn(rcnn, image.cuda(), config["labels_start_index"] - 1)
+                    yolo_detection_output = forward_yolo(yolo_detection, image.cuda(), config["labels_start_index"])
                     origin_annotations['rcnn'].append(rcnn_output)
                     origin_annotations['yolo_detection'].append(yolo_detection_output)
                 elif "license_detection" in annotation_types:
@@ -184,11 +184,11 @@ def read_dataset(config,
     return dataset
 
 
-def forward_rcnn(rcnn, x):
+def forward_rcnn(rcnn, x, labels_start_index):
     with torch.no_grad():
         output = rcnn(x)[0]  # batch = 1
         output['boxes'] = output['boxes'].cpu()
-        output['labels'] = output['labels'].cpu()
+        output['labels'] = output['labels'].cpu() + labels_start_index
         output['scores'] = output['scores'].cpu()
         return output
 
@@ -348,7 +348,8 @@ def get_metrics(decod_dir: str,
                 ocr,
                 dataset,
                 device: str,
-                use_ms_ssim: bool):
+                use_ms_ssim: bool,
+                labels_start_index: int):
     metrics = {}
     model_folders = [f for f in os.scandir(decod_dir) if f.is_dir()]
     dataset_videos = dataset.keys()
@@ -405,8 +406,8 @@ def get_metrics(decod_dir: str,
                         _, _, height, width = image.shape
                         rcnn.transform.min_size = (height,)
                         rcnn.transform.max_size = width
-                        rcnn_output = forward_rcnn(rcnn, image)
-                        yolo_detection_output = forward_yolo(yolo_detection, image)
+                        rcnn_output = forward_rcnn(rcnn, image, labels_start_index - 1)
+                        yolo_detection_output = forward_yolo(yolo_detection, image, labels_start_index)
                         annotations['rcnn'].append(rcnn_output)
                         annotations['yolo_detection'].append(yolo_detection_output)
                     elif "license_detection" in annotation_types:
@@ -599,7 +600,8 @@ def main():
                           ocr,
                           dataset,
                           config["device"],
-                          config["ms_ssim"])
+                          config["ms_ssim"],
+                          config["labels_start_index"])
 
     plot_graphs(metrics, dataset, config["out_path"], config["ms_ssim"])
 
