@@ -335,6 +335,8 @@ def do_train(cfg,
             dist.barrier()
             model, optimizer, checkpointer = reinit_model(model, optimizer, checkpointer,
                                                           cfg, logger, arguments)
+            model.train()
+            model.module.perceptual_loss.eval()
             current_stage = get_current_stage(cfg, epoch)
 
         # Create progress bar
