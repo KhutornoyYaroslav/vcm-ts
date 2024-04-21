@@ -301,8 +301,10 @@ def calculate_mean_ap(annotations, dataset, video_name):
         for class_mean_ap, class_id in zip(map_metrics['map_per_class'], map_metrics['classes']):
             class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
             mean_ap[model][class_name] = class_mean_ap.item() * 100
-        model_mean_ap = map_metrics['map_50'].item()
-        mean_ap[model]['map_50'] = model_mean_ap * 100
+        model_map_50 = map_metrics['map_50'].item()
+        model_map = map_metrics['map_50'].item()
+        mean_ap[model]['map_50'] = model_map_50 * 100
+        mean_ap[model]['map'] = model_map * 100
 
     return mean_ap
 
@@ -470,10 +472,32 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.title(f'Object detection performance on {detection_model} for {video}')
             plt.xlabel('bpp')
             plt.ylabel('mAP@0.5 (%)')
+            plt.savefig(os.path.join(out_path, f"detection_0_5_model_{detection_model}_{video}.png"))
+
+            plt.figure(figsize=(16, 9))
+            orig_map = dataset[video]['mean_ap'][detection_model]['map']
+            map_loss_1 = orig_map - 1
+            map_loss_2 = orig_map - 2
+            plt.axhline(y=orig_map, color='k', linestyle='dashed',
+                        label=f'Original performance ({orig_map:.2f}%)')
+            plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label='1% mAP loss')
+            plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label='2% mAP loss')
+            for codec in codecs:
+                bpps = [info['bpp'] for info in metrics[codec][video]]
+                maps = [info['mean_ap'][detection_model]['map'] for info in metrics[codec][video]]
+                x = np.array(bpps)
+                y = np.array(maps)
+                plt.plot(x, y, 'o-', label=codec)
+            plt.legend()
+            plt.grid()
+            plt.title(f'Object detection performance on {detection_model} for {video}')
+            plt.xlabel('bpp')
+            plt.ylabel('mAP (%)')
             plt.savefig(os.path.join(out_path, f"detection_model_{detection_model}_{video}.png"))
 
             class_names = sorted(list(metrics[codecs[0]][video][0]['mean_ap'][detection_model].keys()))
             class_names.remove('map_50')
+            class_names.remove('map')
             for class_name in class_names:
                 plt.figure(figsize=(16, 9))
                 orig_map = dataset[video]['mean_ap'][detection_model][class_name]
