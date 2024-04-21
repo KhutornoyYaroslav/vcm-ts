@@ -287,7 +287,7 @@ def do_train(cfg,
 
     # Set model to train mode
     model.train()
-    model.module.perceptual_loss.eval()
+    # model.module.perceptual_loss.eval()
 
     # Create tensorboard writer
     save_to_disk = dist_util.is_main_process()
@@ -336,7 +336,7 @@ def do_train(cfg,
             model, optimizer, checkpointer = reinit_model(model, optimizer, checkpointer,
                                                           cfg, logger, arguments)
             model.train()
-            model.module.perceptual_loss.eval()
+            # model.module.perceptual_loss.eval()
             current_stage = get_current_stage(cfg, epoch)
 
         # Create progress bar
@@ -561,7 +561,7 @@ def do_train(cfg,
             add_metrics(cfg, summary_writer, result_dict, global_step, is_train=False)
 
             model.train()
-            model.module.perceptual_loss.eval()
+            # model.module.perceptual_loss.eval()
 
         # Save epoch results
         if epoch % args.save_step == 0:
