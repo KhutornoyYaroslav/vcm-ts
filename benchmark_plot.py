@@ -297,6 +297,8 @@ def calculate_mean_ap(annotations, dataset, video_name):
         else:
             raise RuntimeError("Invalid model type for calculate metrics")
         mean_ap[model] = {}
+        mean_ap[model]['class_map'] = {}
+        mean_ap[model]['class_map_50'] = {}
         metric_map.update(annotations[model], dataset_annotations)
         metric_map_50.update(annotations[model], dataset_annotations)
         map_metrics = metric_map.compute()
