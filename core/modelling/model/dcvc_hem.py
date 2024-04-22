@@ -73,7 +73,7 @@ class DCVC_HEM(nn.Module):
 
         perceptual_loss.disable_gradients()
         perceptual_loss.cuda()
-        # perceptual_loss.eval()
+        perceptual_loss.eval()
         return perceptual_loss
 
     def activate_modules_inter_dist(self):
