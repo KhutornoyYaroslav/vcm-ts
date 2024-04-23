@@ -21,10 +21,13 @@ MODEL:
   ARCHITECTURE: DCVC_HEM
   DEVICE: cuda
   PRETRAINED_WEIGHTS: ''
+  I_FRAME_PRETRAINED_WEIGHTS: ''
 OUTPUT_DIR: outputs/test
 SOLVER:
   LAMBDAS: [85, 170, 380, 840]
+  PL_MODEL: vgg
   PL_LAMBDA: 1.0
+  DIST_LAMBDA: 1.0
   LR: 0.0001
   STAGES: [
     ['1', 'me', 'single', 'me', 'none', '1e-4', '1', 'vgg'],

@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 
 import numpy as np
@@ -7,6 +8,9 @@ import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+from DCVC_HEM.src.models.image_model import IntraNoAR
+from DCVC_HEM.src.utils.common import interpolate_log
+from DCVC_HEM.src.utils.stream_helper import get_state_dict
 from core.data import make_data_loader, make_object_detection_data_loader
 from core.modelling.model import build_model
 from core.solver import make_optimizer
@@ -16,10 +20,13 @@ from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
 from .validation import eval_dataset
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss_key):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss,
+            i_frame_net, i_frame_q_scales):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
+    if isinstance(perceptual_loss, torch.nn.parallel.DistributedDataParallel):
+        perceptual_loss = perceptual_loss.module
 
     object_detection_loader = None
     if cfg.DATASET.METADATA_PATH and cfg.DATASET.TEST_OD_ROOT_DIRS:
@@ -27,7 +34,7 @@ def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
     data_loader = make_data_loader(cfg, seed, False, True)
     model.eval()
     result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                               object_detection_loader, stage, perceptual_loss_key)
+                               object_detection_loader, stage, perceptual_loss, i_frame_net, i_frame_q_scales)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -118,9 +125,6 @@ def get_stage_params(cfg,
         model.module.activate_modules_all()
     else:
         raise SystemError('Invalid pair of part and loss rate')
-    # modules for perceptual loss is always eval
-    model.module.dmc.vgg.eval()
-    # model.module.dmc.rcnn.eval()
 
     # Train method
     if stage_params[2] == 'single_multi':
@@ -151,10 +155,17 @@ def get_stage_params(cfg,
         raise SystemError('Invalid loss rate')
 
     # Learning rate
-    optimizer.param_groups[0]["lr"] = float(stage_params[5])
+    world_size = int(os.environ['WORLD_SIZE'])
+    optimizer.param_groups[0]["lr"] = float(stage_params[5]) * math.sqrt(world_size)
 
     # Perceptual loss
-    result['perceptual_loss'] = stage_params[7]
+    if stage_params[7] == 'true':
+        perceptual_loss = True
+    elif stage_params[7] == 'false':
+        perceptual_loss = False
+    else:
+        raise SystemError('Invalid perceptual loss usage (true or false)')
+    result['perceptual_loss'] = perceptual_loss
 
     return result
 
@@ -163,6 +174,7 @@ def init_model(cfg, logger, arguments):
     # Create model
     model = build_model(cfg).cuda()
     local_rank = int(os.environ['LOCAL_RANK'])
+    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
 
     # Create optimizer
@@ -187,10 +199,10 @@ def reinit_model(model, optimizer, checkpointer, cfg, logger, arguments):
     return init_model(cfg, logger, arguments)
 
 
-def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
+def single_step(input, target, model, stage_params, dpb, optimizer, t_i, outputs):
     input_seqs = []
     decod_seqs = []
-    input_seqs.append(input[:, t_i])
+    input_seqs.append(target[:, t_i])
     decod_seqs.append(input[:, t_i])
 
     loss_list = []
@@ -200,9 +212,10 @@ def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
         optimizer.zero_grad()
         result = model(stage_params['forward_method'],
                        input[:, t_i + 1 + p_idx],
+                       target[:, t_i + 1 + p_idx],
                        stage_params['loss_dist_key'],
                        stage_params['loss_rate_keys'],
-                       perceptual_loss_key=stage_params['perceptual_loss'],
+                       perceptual_loss=stage_params['perceptual_loss'],
                        dpb=dpb)
         loss_to_opt = result['loss_to_opt']
         loss_to_opt.backward()
@@ -231,13 +244,14 @@ def single_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
     outputs['decod_seqs'].append(torch.stack(decod_seqs, -1))  # (N, p_frames + 1)
 
 
-def cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs):
+def cascade_step(input, target, model, stage_params, dpb, optimizer, t_i, outputs):
     optimizer.zero_grad()
     result = model(stage_params['forward_method'],
                    input,
+                   target,
                    stage_params['loss_dist_key'],
                    stage_params['loss_rate_keys'],
-                   perceptual_loss_key=stage_params['perceptual_loss'],
+                   perceptual_loss=stage_params['perceptual_loss'],
                    dpb=dpb,
                    p_frames=stage_params['p_frames'],
                    t_i=t_i)
@@ -273,6 +287,7 @@ def do_train(cfg,
 
     # Set model to train mode
     model.train()
+    model.module.perceptual_loss.eval()
 
     # Create tensorboard writer
     save_to_disk = dist_util.is_main_process()
@@ -291,20 +306,42 @@ def do_train(cfg,
     current_stage = get_current_stage(cfg, start_epoch)
     rank = int(os.environ["RANK"])
 
+    # Initialize i frame net
+    if cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS != "":
+        rate_count = len(cfg.SOLVER.LAMBDAS)
+        i_frame_q_scales = IntraNoAR.get_q_scales_from_ckpt(cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS)
+        if len(i_frame_q_scales) == rate_count:
+            pass
+        else:
+            max_q_scale = i_frame_q_scales[0]
+            min_q_scale = i_frame_q_scales[-1]
+            i_frame_q_scales = interpolate_log(min_q_scale, max_q_scale, rate_count)
+
+        i_state_dict = get_state_dict(cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS)
+        i_frame_net = IntraNoAR()
+        i_frame_net.load_state_dict(i_state_dict, strict=False)
+        i_frame_net = i_frame_net.cuda()
+        i_frame_net.eval()
+    else:
+        i_frame_net = None
+        i_frame_q_scales = None
+
     # Epoch loop
     for epoch in range(start_epoch, max_epoch):
         data_loader.sampler.set_epoch(epoch)
         arguments["epoch"] = epoch + 1
 
         if current_stage != get_current_stage(cfg, epoch):
+            dist.barrier()
             model, optimizer, checkpointer = reinit_model(model, optimizer, checkpointer,
                                                           cfg, logger, arguments)
+            model.train()
+            model.module.perceptual_loss.eval()
             current_stage = get_current_stage(cfg, epoch)
-            dist.barrier()
 
         # Create progress bar
         if dist_util.is_main_process():
-            print(('\n' + '%10s' * 8 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'rank',
+            print(('\n' + '%10s' * 7 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'loss', 'rank',
                                                       'dist', 'p_dist', 'bpp', 'psnr'))
 
         # Iteration loop
@@ -333,8 +370,9 @@ def do_train(cfg,
             global_step = epoch * iters_per_epoch + iteration * args.num_gpus
 
             # Get data
-            input, _ = data_entry  # (N, T, C, H, W)
+            input, target = data_entry  # (N, T, C, H, W)
             input = input.cuda()
+            target = target.cuda()
 
             # if iteration == 0:
             #     rank = int(os.environ["RANK"])
@@ -366,17 +404,30 @@ def do_train(cfg,
 
             for t_i in range(0, t - stage_params['p_frames']):
                 # Initialize I-frame
-                dpb = {
-                    "ref_frame": input[:, t_i],
-                    "ref_feature": None,
-                    "ref_y": None,
-                    "ref_mv_y": None
-                }
+                if i_frame_net is not None:
+                    out_images = []
+                    for i in range(n):
+                        with torch.no_grad():
+                            out_i = i_frame_net(input[i, t_i].unsqueeze(0), i_frame_q_scales[i])
+                        out_images.append(out_i["x_hat"].squeeze(0))
+                    dpb = {
+                        "ref_frame": torch.stack(out_images, 0),
+                        "ref_feature": None,
+                        "ref_y": None,
+                        "ref_mv_y": None
+                    }
+                else:
+                    dpb = {
+                        "ref_frame": input[:, t_i],
+                        "ref_feature": None,
+                        "ref_y": None,
+                        "ref_mv_y": None
+                    }
 
                 if stage_params['forward_method'] == 'single_multi':
-                    single_step(input, model, stage_params, dpb, optimizer, t_i, outputs)
+                    single_step(input, target, model, stage_params, dpb, optimizer, t_i, outputs)
                 elif stage_params['forward_method'] == 'cascade_multi':
-                    cascade_step(input, model, stage_params, dpb, optimizer, t_i, outputs)
+                    cascade_step(input, target, model, stage_params, dpb, optimizer, t_i, outputs)
 
             outputs['rate'] = torch.stack(outputs['rate'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
             outputs['dist'] = torch.stack(outputs['dist'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
@@ -403,10 +454,9 @@ def do_train(cfg,
             bpp = [f'{x:.2f}' for x in bpp]
             psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
-            s = ('%10s' * 3 + '%10.4g' * 5 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
+            s = ('%10s' * 3 + '%10.4g' * 4 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
                                                             ('%g' % (stage_params['stage'] + 1)),
                                                             mem,
-                                                            optimizer.param_groups[0]["lr"],
                                                             stats['loss_sum'] / total_iterations,
                                                             rank,
                                                             stats['dist'] / total_iterations,
@@ -489,7 +539,9 @@ def do_train(cfg,
                                   stage_params['p_frames'],
                                   args.seed,
                                   stage_params['stage'] + 1,
-                                  stage_params['perceptual_loss'])
+                                  stage_params['perceptual_loss'],
+                                  i_frame_net,
+                                  i_frame_q_scales)
 
             print(('\n' + 'Evaluation results:' + '%10s' * 3 + '%37s' * 3) % ('loss', 'dist', 'p_dist', 'bpp', 'psnr',
                                                                               'mAP'))
@@ -509,6 +561,7 @@ def do_train(cfg,
             add_metrics(cfg, summary_writer, result_dict, global_step, is_train=False)
 
             model.train()
+            model.module.perceptual_loss.eval()
 
         # Save epoch results
         if epoch % args.save_step == 0:

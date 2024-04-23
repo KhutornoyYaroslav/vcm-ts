@@ -6,13 +6,17 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+from DCVC_HEM.src.models.image_model import IntraNoAR
+from DCVC_HEM.src.utils.common import interpolate_log
+from DCVC_HEM.src.utils.stream_helper import get_state_dict
 from core.data import make_data_loader, make_object_detection_data_loader
 from core.utils import dist_util
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
 from .validation import eval_dataset
 
 
-def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss_key):
+def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss,
+            i_frame_net, i_frame_q_scales):
     torch.cuda.empty_cache()
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         model = model.module
@@ -23,7 +27,7 @@ def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
         object_detection_loader = make_object_detection_data_loader(cfg)
     model.eval()
     result_dict = eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                               object_detection_loader, stage, perceptual_loss_key)
+                               object_detection_loader, stage, perceptual_loss, i_frame_net, i_frame_q_scales)
 
     torch.cuda.empty_cache()
     return result_dict
@@ -111,9 +115,6 @@ def get_stage_params(cfg,
         model.activate_modules_all()
     else:
         raise SystemError('Invalid pair of part and loss rate')
-    # modules for perceptual loss is always eval
-    model.dmc.vgg.eval()
-    # model.dmc.rcnn.eval()
 
     # Train method
     if stage_params[2] == 'single':
@@ -147,7 +148,13 @@ def get_stage_params(cfg,
     optimizer.param_groups[0]["lr"] = float(stage_params[5])
 
     # Perceptual loss
-    result['perceptual_loss'] = stage_params[7]
+    if stage_params[7] == 'true':
+        perceptual_loss = True
+    elif stage_params[7] == 'false':
+        perceptual_loss = False
+    else:
+        raise SystemError('Invalid perceptual loss usage (true or false)')
+    result['perceptual_loss'] = perceptual_loss
 
     return result
 
@@ -169,6 +176,7 @@ def do_train(cfg,
 
     # Set model to train mode
     model.train()
+    model.perceptual_loss.eval()
 
     # Create tensorboard writer
     save_to_disk = dist_util.is_main_process()
@@ -185,12 +193,32 @@ def do_train(cfg,
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
 
+    # Initialize i frame net
+    if cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS != "":
+        rate_count = len(cfg.SOLVER.LAMBDAS)
+        i_frame_q_scales = IntraNoAR.get_q_scales_from_ckpt(cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS)
+        if len(i_frame_q_scales) == rate_count:
+            pass
+        else:
+            max_q_scale = i_frame_q_scales[0]
+            min_q_scale = i_frame_q_scales[-1]
+            i_frame_q_scales = interpolate_log(min_q_scale, max_q_scale, rate_count)
+
+        i_state_dict = get_state_dict(cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS)
+        i_frame_net = IntraNoAR()
+        i_frame_net.load_state_dict(i_state_dict, strict=False)
+        i_frame_net = i_frame_net.cuda()
+        i_frame_net.eval()
+    else:
+        i_frame_net = None
+        i_frame_q_scales = None
+
     # Epoch loop
     for epoch in range(start_epoch, max_epoch):
         arguments["epoch"] = epoch + 1
 
         # Create progress bar
-        print(('\n' + '%10s' * 7 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'lr', 'loss', 'dist', 'p_dist',
+        print(('\n' + '%10s' * 6 + '%37s' * 2) % ('Epoch', 'stage', 'gpu_mem', 'loss', 'dist', 'p_dist',
                                                   'bpp', 'psnr'))
 
         pbar = enumerate(data_loader)
@@ -219,17 +247,21 @@ def do_train(cfg,
             global_step = epoch * iters_per_epoch + iteration
 
             # Get data
-            input, _ = data_entry  # (N, T, C, H, W)
+            input, target = data_entry  # (N, T, C, H, W)
             input = input.cuda()
+            target = target.cuda()
 
             # Optimize model
             outputs = model(stage_params['forward_method'],
                             input,
+                            target,
                             stage_params['loss_dist_key'],
                             stage_params['loss_rate_keys'],
                             stage_params['p_frames'],
                             stage_params['perceptual_loss'],
-                            optimizer=optimizer)
+                            optimizer=optimizer,
+                            i_frame_net=i_frame_net,
+                            i_frame_q_scales=i_frame_q_scales)
             total_iterations += outputs['single_forwards']
 
             # Update stats
@@ -245,10 +277,9 @@ def do_train(cfg,
             bpp = [f'{x:.2f}' for x in bpp]
             psnr = 10 * np.log10(1.0 / (stats['psnr'] / total_iterations))
             psnr = [f'{x:.1f}' for x in psnr]
-            s = ('%10s' * 3 + '%10.4g' * 4 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
+            s = ('%10s' * 3 + '%10.4g' * 3 + '%37s' * 2) % ('%g/%g' % (epoch + 1, max_epoch),
                                                             ('%g' % (stage_params['stage'] + 1)),
                                                             mem,
-                                                            optimizer.param_groups[0]["lr"],
                                                             stats['loss_sum'] / total_iterations,
                                                             stats['dist'] / total_iterations,
                                                             stats['p_dist'] / total_iterations,
@@ -284,7 +315,9 @@ def do_train(cfg,
                                   stage_params['p_frames'],
                                   seed,
                                   stage_params['stage'] + 1,
-                                  stage_params['perceptual_loss'])
+                                  stage_params['perceptual_loss'],
+                                  i_frame_net,
+                                  i_frame_q_scales)
 
             print(('\n' + 'Evaluation results:' + '%10s' * 3 + '%37s' * 3) % ('loss', 'dist', 'p_dist', 'bpp', 'psnr',
                                                                               'mAP'))
@@ -304,6 +337,7 @@ def do_train(cfg,
             add_metrics(cfg, summary_writer, result_dict, global_step, is_train=False)
 
             model.train()
+            model.perceptual_loss.eval()
 
         # Save epoch results
         if epoch % args.save_step == 0:

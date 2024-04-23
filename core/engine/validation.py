@@ -3,11 +3,13 @@ import os
 
 import numpy as np
 import torch
+import torchvision
 from torchmetrics.detection import MeanAveragePrecision
 from tqdm import tqdm
 from ultralytics import YOLO
 
 from DCVC_HEM.src.utils.stream_helper import get_padding_size
+from core.engine.losses import FasterRCNNFPNPerceptualLoss, FasterRCNNPerceptualLoss
 from core.utils.tensorboard import add_best_and_worst_sample
 
 
@@ -40,6 +42,15 @@ def forward_yolo(yolo, x, labels_start_index=1):
         return output
 
 
+def forward_rcnn(rcnn, x):
+    with torch.no_grad():
+        output = rcnn(x)[0]  # batch = 1
+        output['boxes'] = output['boxes'].cpu()
+        output['labels'] = output['labels'].cpu()
+        output['scores'] = output['scores'].cpu()
+        return output
+
+
 def delete_unsupported_annotations(annotations, classes):
     for sub_annotations in annotations:
         for annotation in sub_annotations:
@@ -52,7 +63,7 @@ def delete_unsupported_annotations(annotations, classes):
 
 
 def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames, data_loader, cfg,
-                 object_detection_loader=None, stage=0, perceptual_loss_key=None):
+                 object_detection_loader=None, stage=0, perceptual_loss=False, i_frame_net=None, i_frame_q_scales=None):
     logger = logging.getLogger("CORE.inference")
 
     # Iteration loop
@@ -72,21 +83,25 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
     best_samples = [[] for _ in range(n)]
     worst_samples = [[] for _ in range(n)]
     for data_entry in tqdm(data_loader):
-        input, _ = data_entry  # (N, T, C, H, W)
+        input, target = data_entry  # (N, T, C, H, W)
 
         # Forward images
         with torch.no_grad():
             # Forward data to GPU
             input = input.cuda()
+            target = target.cuda()
 
             # Do prediction
             outputs = model(forward_method,
                             input,
+                            target,
                             loss_dist_key,
                             loss_rate_keys,
                             p_frames=p_frames,
-                            perceptual_loss_key=perceptual_loss_key,
-                            is_train=False)
+                            perceptual_loss=perceptual_loss,
+                            is_train=False,
+                            i_frame_net=i_frame_net,
+                            i_frame_q_scales=i_frame_q_scales)
 
         stats['loss_sum'] += torch.sum(torch.mean(outputs['loss'], -1)).item()  # (T-1) -> (1)
         stats['dist'] += torch.mean(torch.sum(outputs['dist'], -1)).item()  # (T-1) -> (1)
@@ -98,8 +113,15 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
         add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
 
     if object_detection_loader is not None and stage >= cfg.DATASET.OD_STAGE:
-        yolo_detection = YOLO('pretrained/yolov8m.pt')
-        yolo_detection = yolo_detection.cuda()
+        if (isinstance(model.perceptual_loss, FasterRCNNFPNPerceptualLoss) or
+                isinstance(model.perceptual_loss, FasterRCNNPerceptualLoss)):
+            detector = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(min_size=1088, max_size=1920)
+            detector.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
+            detector.cuda()
+            detector.eval()
+        else:
+            detector = YOLO('pretrained/yolov8m.pt')
+            detector = detector.cuda()
         classes = read_dataset_classes(cfg)
         output_annotations = [[] for _ in range(n)]
         source_annotations = [[] for _ in range(n)]
@@ -118,27 +140,37 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
                 if frame_idx % cfg.DATASET.OD_GOP_SIZE == 0:
                     dpb = []
                     for i in range(n):
-                        dpb.append({
-                            "ref_frame": input[i],
-                            "ref_feature": None,
-                            "ref_y": None,
-                            "ref_mv_y": None,
-                        })
-
-                    output = forward_yolo(yolo_detection, input[0])
-                    for i in range(n):
-                        output_annotations[i].append(output)
+                        if i_frame_net is not None:
+                            out_i = i_frame_net(input[i], i_frame_q_scales[i])
+                            dpb.append({
+                                "ref_frame": out_i["x_hat"],
+                                "ref_feature": None,
+                                "ref_y": None,
+                                "ref_mv_y": None
+                            })
+                        else:
+                            dpb.append({
+                                "ref_frame": input[i],
+                                "ref_feature": None,
+                                "ref_y": None,
+                                "ref_mv_y": None,
+                            })
+                    torch.cuda.empty_cache()
                 else:
                     dpb = model('forward_simple',
                                 input,
                                 dpb=dpb)
-
                     torch.cuda.empty_cache()
-                    for i in range(n):
-                        input_yolo = dpb[i]["ref_frame"]  # (N, C, H, W)
-                        input_yolo = input_yolo.clamp(0, 1)
-                        output = forward_yolo(yolo_detection, input_yolo)
-                        output_annotations[i].append(output)
+
+                for i in range(n):
+                    input_to_detect = dpb[i]["ref_frame"]  # (N, C, H, W)
+                    input_to_detect = input_to_detect.clamp(0, 1)
+                    if (isinstance(model.perceptual_loss, FasterRCNNFPNPerceptualLoss) or
+                            isinstance(model.perceptual_loss, FasterRCNNPerceptualLoss)):
+                        output = forward_rcnn(detector, input_to_detect)
+                    else:
+                        output = forward_yolo(detector, input_to_detect)
+                    output_annotations[i].append(output)
                     torch.cuda.empty_cache()
 
         delete_unsupported_annotations(output_annotations, classes)

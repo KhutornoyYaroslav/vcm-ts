@@ -4,11 +4,9 @@
 import math
 
 import torch
+from pytorch_msssim import MS_SSIM
 from torch import nn
 
-from pytorch_msssim import MS_SSIM
-
-from core.engine.losses import VGGPerceptualLoss, FasterRCNNPerceptualLoss
 from .video_net import LowerBound
 from ..entropy_models.entropy_models import BitEstimator, GaussianEncoder, EntropyCoder
 
@@ -28,8 +26,6 @@ class CompressionModel(nn.Module):
         self.gaussian_encoder = GaussianEncoder(distribution=y_distribution)
 
         self.mse = nn.MSELoss(reduction='none')
-        self.vgg = VGGPerceptualLoss()
-        # self.rcnn = FasterRCNNPerceptualLoss()
         self.ssim = MS_SSIM(data_range=1.0, size_average=False)
 
     def _initialize_weights(self):

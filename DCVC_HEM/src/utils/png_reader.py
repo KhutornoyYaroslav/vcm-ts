@@ -20,7 +20,7 @@ class PNGReader():
         self.current_frame_index = 1
         self.eof = False
 
-    def read_one_frame(self, src_format="rgb"):
+    def read_one_frame(self, src_format="rgb", get_png_path=False):
         def _none_exist_frame():
             if src_format == "rgb":
                 return None
@@ -40,6 +40,10 @@ class PNGReader():
         rgb = rgb / 255.
 
         self.current_frame_index += 1
+
+        if get_png_path:
+            return rgb, png_path
+
         return rgb
 
     def close(self):
