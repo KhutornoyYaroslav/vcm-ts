@@ -580,8 +580,8 @@ def compute_residuals(root: str,
     pbar = tqdm(total=len(source_frames))
     for source_frame_path, encoded_frame_path in zip(source_frames, encoded_frames):
         # Compute
-        source_frame = cv.imread(source_frame_path)
-        encoded_frame = cv.imread(encoded_frame_path)
+        source_frame = cv.imread(source_frame_path).astype(np.float32)
+        encoded_frame = cv.imread(encoded_frame_path).astype(np.float32)
         h, w, c = source_frame.shape
         residual = source_frame - encoded_frame
         residual = (residual + 255) / 2
@@ -636,25 +636,25 @@ def fuse_layers(root: str,
                 liplates_enable: bool = True,
                 faces_padding: int = 0,
                 liplates_padding: int = 0,
-                filename_template: str = "%05d.png"):
+                filename_template: str = "im%05d.png"):
     logger = logging.getLogger(_LOGGER_NAME)
 
     # Scan files
-    vsr_folder = os.path.join(root, _PATHS_ARTIFACTS_VSR)
-    vsr_filelist = sorted(glob(os.path.join(vsr_folder, "*")))
+    dcvc_hem_folder = os.path.join(root, _PATHS_ARTIFACTS_DCVC_HEM)
+    dcvc_hem_filelist = sorted(glob(os.path.join(dcvc_hem_folder, "*.png")))
 
-    cutout_folder = os.path.join(root, _PATHS_ARTIFACTS_CUTOUT_ENCODED)
-    cutout_filelist = sorted(glob(os.path.join(cutout_folder, "*")))
+    enhancement_folder = os.path.join(root, _PATHS_ARTIFACTS_RESIDUALS)
+    enhancement_filelist = sorted(glob(os.path.join(enhancement_folder, "*.png")))
 
     if liplates_enable:
         liplates_coords_folder = os.path.join(root, _PATHS_ENCODED_DIR, 'liplates_coords')
         liplates_coords_filelist = sorted(glob(os.path.join(liplates_coords_folder, "*")))
-        assert len(liplates_coords_filelist) == len(vsr_filelist)
+        assert len(liplates_coords_filelist) == len(dcvc_hem_filelist)
 
     if faces_enable:
         faces_coords_folder = os.path.join(root, _PATHS_ENCODED_DIR, 'faces_coords')
         faces_coords_filelist = sorted(glob(os.path.join(faces_coords_folder, "*")))
-        assert len(faces_coords_filelist) == len(vsr_filelist)
+        assert len(faces_coords_filelist) == len(dcvc_hem_filelist)
 
     # Create result dirs
     res_folder = os.path.join(root, _PATHS_ARTIFACTS_RESULT)
@@ -664,11 +664,12 @@ def fuse_layers(root: str,
     # Process frames
     logger.info('Creating result frames')
     cnt = 0
-    pbar = tqdm(total=len(vsr_filelist))
-    for vsr_file, cutout_file in zip(vsr_filelist, cutout_filelist):
+    pbar = tqdm(total=len(dcvc_hem_filelist))
+    for dcvc_hem_file, enhancement_file in zip(dcvc_hem_filelist, enhancement_filelist):
         # Read frames
-        vsr_frame = cv.imread(vsr_file)
-        cutout_frame = cv.imread(cutout_file)
+        dcvc_hem_frame = cv.imread(dcvc_hem_file).astype(np.float32)
+        enhancement_frame_residual = cv.imread(enhancement_file).astype(np.float32)
+        enhancement_frame = enhancement_frame_residual * 2 - 255
 
         # Read liplates bounding boxes
         lp_bboxes = []
@@ -685,7 +686,7 @@ def fuse_layers(root: str,
             f.close()
 
         # Create mask
-        h, w, c = vsr_frame.shape
+        h, w, c = dcvc_hem_frame.shape
         mask = np.zeros(shape=(h, w, 1), dtype=np.float32)
         for [x1, y1, x2, y2] in lp_bboxes:
             mask[y1:y2, x1:x2] = create_gradient_mask(w=x2 - x1, h=y2 - y1, border_size=liplates_padding)
@@ -693,13 +694,13 @@ def fuse_layers(root: str,
             mask[y1:y2, x1:x2] = create_gradient_mask(w=x2 - x1, h=y2 - y1, border_size=faces_padding)
 
         # Process
-        result_frame = (1 - mask) * vsr_frame.astype(np.float32)
-        result_frame += mask * cutout_frame.astype(np.float32)
+        result_frame = dcvc_hem_frame
+        result_frame += mask * enhancement_frame
         result_frame = np.clip(result_frame, 0, 255)
         result_frame = result_frame.astype(np.uint8)
 
         # Save result
-        img_path = os.path.join(res_folder, filename_template % cnt)
+        img_path = os.path.join(res_folder, filename_template % (cnt + 1))
         cv.imwrite(img_path, result_frame)
         cnt += 1
 
@@ -836,11 +837,11 @@ def calc_visual_metrics(root: str,
     logger = logging.getLogger(_LOGGER_NAME)
 
     # Scan files
-    hr_folder = os.path.join(root, _PATHS_ARTIFACTS_SOURCE_FRAMES)
-    hr_filelist = sorted(glob(os.path.join(hr_folder, "*")))
+    source_folder = os.path.join(root, _PATHS_ARTIFACTS_SOURCE_FRAMES)
+    source_filelist = sorted(glob(os.path.join(source_folder, "*.png")))
 
     result_folder = os.path.join(root, _PATHS_ARTIFACTS_RESULT)
-    result_filelist = sorted(glob(os.path.join(result_folder, "*")))
+    result_filelist = sorted(glob(os.path.join(result_folder, "*.png")))
 
     liplates_coords_folder = os.path.join(root, _PATHS_ENCODED_DIR, 'liplates_coords')
     liplates_coords_filelist = sorted(glob(os.path.join(liplates_coords_folder, "*")))
@@ -851,23 +852,23 @@ def calc_visual_metrics(root: str,
     # Process frames
     logger.info('Calculating PSNR metrics...')
 
-    psnrs, psnrs_vsr, psnrs_cutout = [], [], []
-    pbar = tqdm(total=len(hr_filelist))
-    for file_idx, _ in enumerate(hr_filelist):
+    psnrs, psnrs_dcvc_hem, psnrs_enhancement = [], [], []
+    pbar = tqdm(total=len(source_filelist))
+    for file_idx, _ in enumerate(source_filelist):
         # Read frames
-        hr_frame = cv.imread(hr_filelist[file_idx])
+        hr_frame = cv.imread(source_filelist[file_idx])
         result_frame = cv.imread(result_filelist[file_idx])
 
         # Read liplates bounding boxes
         lp_bboxes = []
-        if len(liplates_coords_filelist) == len(hr_filelist):
+        if len(liplates_coords_filelist) == len(source_filelist):
             f = open(liplates_coords_filelist[file_idx], 'rb')
             lp_bboxes = pickle.load(f)
             f.close()
 
         # Read faces bounding boxes
         face_bboxes = []
-        if len(faces_coords_filelist) == len(hr_filelist):
+        if len(faces_coords_filelist) == len(source_filelist):
             f = open(faces_coords_filelist[file_idx], 'rb')
             face_bboxes = pickle.load(f)
             f.close()
@@ -887,16 +888,16 @@ def calc_visual_metrics(root: str,
         mask_zeros = hr_frame.size - mask_nonzeros
 
         mse = (hr_frame.astype(np.float32) / 255.0 - result_frame.astype(np.float32) / 255.0) ** 2
-        mse_vsr = mse * (1.0 - mask)
-        mse_cutout = mse * mask
+        mse_dcvc_hem = mse * (1.0 - mask)
+        mse_enhancement = mse * mask
 
         psnr = 10 * np.log10(1.0 / np.mean(mse))
-        psnr_vsr = 10 * np.log10(1.0 / (np.sum(mse_vsr) / mask_zeros))
-        psnr_cutout = 10 * np.log10(1.0 / (np.sum(mse_cutout) / mask_nonzeros))
+        psnr_dcvc_hem = 10 * np.log10(1.0 / (np.sum(mse_dcvc_hem) / mask_zeros))
+        psnr_enhancement = 10 * np.log10(1.0 / (np.sum(mse_enhancement) / mask_nonzeros))
 
         psnrs.append(psnr)
-        psnrs_vsr.append(psnr_vsr)
-        psnrs_cutout.append(psnr_cutout)
+        psnrs_dcvc_hem.append(psnr_dcvc_hem)
+        psnrs_enhancement.append(psnr_enhancement)
 
         pbar.update(1)
     pbar.close()
@@ -907,8 +908,8 @@ def calc_visual_metrics(root: str,
     with open(metrics_file, 'w') as f:
         f.write(f'Results for: {video_path}\n')
         f.write(f'Total PSNR [RGB format]: {np.mean(psnrs)}\n')
-        f.write(f'VSR PSNR [RGB format]: {np.mean(psnrs_vsr)}\n')
-        f.write(f'Cutout layer PSNR [RGB format]: {np.mean(psnrs_cutout)}\n')
+        f.write(f'DCVC-HEM PSNR [RGB format]: {np.mean(psnrs_dcvc_hem)}\n')
+        f.write(f'Enhancement layer PSNR [RGB format]: {np.mean(psnrs_enhancement)}\n')
 
 
 def str2bool(s):
@@ -929,7 +930,7 @@ def main():
                         help="Path where to save results")
     parser.add_argument('--do-encode', dest='do_encode', required=False, type=str2bool, default=True,
                         help="Encoding enable")
-    parser.add_argument('--do-decode', dest='do_decode', required=False, type=str2bool, default=False,
+    parser.add_argument('--do-decode', dest='do_decode', required=False, type=str2bool, default=True,
                         help="Decoding enable")
     args = parser.parse_args()
 
@@ -995,6 +996,27 @@ def main():
         calc_bitrate_metrics(root=args.result_root,
                              video_path=args.video_path)
 
+    # Decode
+    if args.do_decode:
+        # ---------------- DECODER ----------------
+        fuse_layers(root=args.result_root,
+                    faces_enable=codec_settings.ENHANCEMENT_LAYER.DETECTORS.FACES.ENABLE,
+                    liplates_enable=codec_settings.ENHANCEMENT_LAYER.DETECTORS.LIPLATES.ENABLE,
+                    faces_padding=codec_settings.ENHANCEMENT_LAYER.DETECTORS.FACES.PADDING,
+                    liplates_padding=codec_settings.ENHANCEMENT_LAYER.DETECTORS.LIPLATES.PADDING)
+
+        encode_frames(src_root=os.path.join(args.result_root, _PATHS_ARTIFACTS_RESULT),
+                      video_path=os.path.join(args.result_root, _PATHS_DECODED_DIR, 'svs_decoded.h265'),
+                      crf=0,
+                      preset='medium',
+                      pix_fmt='gbrp',
+                      save_to_frames=False)
+
+        calc_visual_metrics(root=args.result_root,
+                            video_path=args.video_path,
+                            liplates_padding=codec_settings.ENHANCEMENT_LAYER.DETECTORS.LIPLATES.PADDING,
+                            faces_padding=codec_settings.ENHANCEMENT_LAYER.DETECTORS.FACES.PADDING)
+
 
 
     #     # ---------------- ENCODER [VIDEO LAYER] ----------------
@@ -1054,23 +1076,23 @@ def main():
     #            weights_path=codec_settings.VIDEO_LAYER.VSR_MODEL.WEIGHTS_PATH,
     #            device=codec_settings.VIDEO_LAYER.VSR_MODEL.DEVICE)
     #
-    #     fuse_layers(root=args.result_root,
-    #                 faces_enable=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.ENABLE,
-    #                 liplates_enable=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.ENABLE,
-    #                 faces_padding=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.PADDING,
-    #                 liplates_padding=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.PADDING)
+        # fuse_layers(root=args.result_root,
+        #             faces_enable=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.ENABLE,
+        #             liplates_enable=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.ENABLE,
+        #             faces_padding=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.PADDING,
+        #             liplates_padding=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.PADDING)
     #
-    #     encode_frames(src_root=os.path.join(args.result_root, _PATHS_ARTIFACTS_RESULT),
-    #                   video_path=os.path.join(args.result_root, _PATHS_DECODED_DIR, 'svs_decoded.h265'),
-    #                   crf=0,
-    #                   preset='medium',
-    #                   pix_fmt='gbrp',
-    #                   save_to_frames=False)
+        # encode_frames(src_root=os.path.join(args.result_root, _PATHS_ARTIFACTS_RESULT),
+        #               video_path=os.path.join(args.result_root, _PATHS_DECODED_DIR, 'svs_decoded.h265'),
+        #               crf=0,
+        #               preset='medium',
+        #               pix_fmt='gbrp',
+        #               save_to_frames=False)
     #
-    #     calc_visual_metrics(root=args.result_root,
-    #                         video_path=args.video_path,
-    #                         liplates_padding=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.PADDING,
-    #                         faces_padding=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.PADDING)
+        # calc_visual_metrics(root=args.result_root,
+        #                     video_path=args.video_path,
+        #                     liplates_padding=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.PADDING,
+        #                     faces_padding=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.PADDING)
 
 
 if __name__ == '__main__':
