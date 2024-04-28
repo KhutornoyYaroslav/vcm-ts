@@ -19,10 +19,7 @@ from DCVC_HEM.src.utils.common import interpolate_log
 from DCVC_HEM.src.utils.png_reader import PNGReader
 from DCVC_HEM.src.utils.stream_helper import get_state_dict, get_padding_size, np_image_to_tensor, save_torch_image
 from core.config import codec_settings
-from core.config.default import _CFG as cfg
-from core.modelling.model import _MODEL_ARCHITECTURES
 from core.utils import dist_util
-from core.utils.checkpoint import CheckPointer
 from core.utils.logger import setup_logger, logging
 from core.utils.video import get_video_length, get_video_resolution
 
@@ -31,11 +28,6 @@ _PATHS_ARTIFACTS_SOURCE_FRAMES = "artifacts/source_frames"
 _PATHS_ARTIFACTS_DCVC_HEM = "artifacts/dcvc_hem"
 _PATHS_ARTIFACTS_RESIDUALS = "artifacts/residuals"
 _PATHS_ARTIFACTS_RESIDUALS_ENCODED = "artifacts/residuals_h265"
-_PATHS_ARTIFACTS_LR = "artifacts/lr"
-_PATHS_ARTIFACTS_LR_ENCODED = "artifacts/lr_h265"
-_PATHS_ARTIFACTS_CUTOUT = "artifacts/cutout"
-_PATHS_ARTIFACTS_CUTOUT_ENCODED = "artifacts/cutout_h265"
-_PATHS_ARTIFACTS_VSR = "artifacts/vsr_frames"
 _PATHS_ARTIFACTS_RESULT = "artifacts/result_frames"
 _PATHS_ENCODED_DIR = "encoded"
 _PATHS_DECODED_DIR = "decoded"
@@ -113,7 +105,8 @@ def run_dcvc(video_net, i_frame_net, args, device):
                 value=0,
             )
 
-            bin_path = os.path.join(args['bin_folder'], f"im{str(frame_idx + 1).zfill(5)}.bin") if write_stream else None
+            bin_path = os.path.join(args['bin_folder'],
+                                    f"im{str(frame_idx + 1).zfill(5)}.bin") if write_stream else None
 
             if frame_idx % gop == 0:
                 result = i_frame_net.encode_decode(x_padded, args['i_frame_q_scale'], bin_path,
@@ -221,204 +214,6 @@ def encode_decode_dcvc(frames_dir: str,
     )
     logger.info('Encoding/decoding with DCVC-HEM')
     run_dcvc(video_net, i_frame_net, args, device)
-
-
-def downsample_and_save_video(video_path: str,
-                              result_root: str,
-                              downsample_factor: int = 4,
-                              filename_template: str = "%05d.png"):
-    logger = logging.getLogger(_LOGGER_NAME)
-
-    # Open video
-    cap = cv.VideoCapture(video_path)
-    if not cap.isOpened():
-        logger.error(f"Failed to open video file '{video_path}'")
-        return 0
-
-    # Create result directory
-    res_folder = os.path.join(result_root, _PATHS_ARTIFACTS_LR)
-    shutil.rmtree(res_folder, ignore_errors=True)
-    os.makedirs(res_folder, exist_ok=True)
-
-    # Downsample and save frames
-    logger.info(f"Downsampling x{downsample_factor} frames")
-    cnt = 0
-    pbar = tqdm(total=get_video_length(video_path, True))
-    while 1:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        frame_ds = imresize(frame, 1.0 / downsample_factor, 'bicubic')
-        cv.imwrite(os.path.join(res_folder, filename_template % cnt), frame_ds)
-        cnt += 1
-        pbar.update(1)
-    pbar.close()
-    logger.info(f"Video downsampling results in {cnt} frames")
-
-    return cnt
-
-
-def downsample_and_save_frames(result_root: str,
-                               downsample_factor: int = 4,
-                               filename_template: str = "%05d.png"):
-    logger = logging.getLogger(_LOGGER_NAME)
-
-    # Scan frames
-    hr_folder = os.path.join(result_root, _PATHS_ARTIFACTS_SOURCE_FRAMES)
-    hr_filelist = sorted(glob(os.path.join(hr_folder, "*")))
-
-    # Create result directory
-    res_folder = os.path.join(result_root, _PATHS_ARTIFACTS_LR)
-    shutil.rmtree(res_folder, ignore_errors=True)
-    os.makedirs(res_folder, exist_ok=True)
-
-    # Downsample and save frames
-    logger.info(f"Downsampling x{downsample_factor} frames")
-    cnt = 0
-    pbar = tqdm(total=len(hr_filelist))
-    for hr_file in hr_filelist:
-        hr_frame = cv.imread(hr_file)
-        frame_ds = imresize(hr_frame, 1.0 / downsample_factor, 'bicubic')
-        cv.imwrite(os.path.join(res_folder, filename_template % cnt), frame_ds)
-        cnt += 1
-        pbar.update(1)
-    pbar.close()
-    logger.info(f"Video downsampling results in {cnt} frames")
-
-    return cnt
-
-
-def encode_folder(src_files, out_path, crf: int, preset: str = 'ultrafast', pix_fmt: str = 'gbrp'):
-    call([
-        'ffmpeg',
-        '-i', src_files,
-        '-pix_fmt', pix_fmt,
-        '-c:v', 'libx265',
-        '-preset', preset,
-        '-crf', str(crf),
-        '-y', out_path
-    ])
-
-    return out_path
-
-
-def encode_frames(src_root: str,
-                  video_path: str,
-                  crf: int,
-                  preset='medium',
-                  pix_fmt: str = 'gbrp',
-                  save_to_frames=True,
-                  frames_path: str = '',
-                  filename_template: str = "im%05d.png"):
-    logger = logging.getLogger(_LOGGER_NAME)
-
-    # Scan frames
-    src_files = os.path.join(src_root, filename_template)
-
-    # Call encoder
-    logger.info(f"Encoding '{src_files}' frames to '{video_path}'")
-    os.makedirs(os.path.dirname(video_path), exist_ok=True)
-    encode_folder(src_files, video_path, crf=crf, preset=preset, pix_fmt=pix_fmt)
-
-    # Encoded video to frames
-    if save_to_frames:
-        shutil.rmtree(frames_path, ignore_errors=True)
-        os.makedirs(frames_path, exist_ok=True)
-        video_to_frames(video_path, frames_path, '', filename_template)
-
-        # Check lengths
-        src_length = len(sorted(glob(src_root)))
-        dst_length = len(sorted(glob(frames_path)))
-        assert src_length == dst_length
-
-
-def do_vsr(result_root: str,
-           model_arch: str,
-           model_num_blocks: int,
-           model_mid_channels: int,
-           chunk_size: int,
-           tile_size: int,
-           tile_padding: int,
-           weights_path: str,
-           device: str = 'cuda',
-           filename_template: str = "%05d.png"):
-    logger = logging.getLogger(_LOGGER_NAME)
-
-    # Create device
-    device = torch.device(device)
-
-    # Create model
-    logger.info(f"Creating '{model_arch}' model")
-    cfg.MODEL.NUM_BLOCKS = model_num_blocks
-    cfg.MODEL.MID_CHANNELS = model_mid_channels
-    model = _MODEL_ARCHITECTURES[model_arch](cfg)
-    model.to(device)
-    model.eval()
-
-    # Load model weights
-    logger.info(f"Initializing model parameters by '{weights_path}'")
-    checkpointer = CheckPointer(model)
-    checkpointer.load(weights_path)
-
-    # Create result dir
-    res_folder = os.path.join(result_root, _PATHS_ARTIFACTS_VSR)
-    shutil.rmtree(res_folder, ignore_errors=True)
-    os.makedirs(res_folder, exist_ok=True)
-
-    # Process frames
-    lr_folder = os.path.join(result_root, _PATHS_ARTIFACTS_LR_ENCODED)
-    lr_filelist = sorted(glob(os.path.join(lr_folder, "*")))
-
-    # Process each group of frames
-    logger.info(f"Decoding super resolution frames")
-    cnt = 0
-    pbar = tqdm(total=len(lr_filelist))
-    while lr_filelist:
-        lr_chunk, lr_filelist = lr_filelist[:chunk_size], lr_filelist[chunk_size:]
-
-        # Split frames to tiles
-        w_orig, h_orig = 0, 0
-        lr_chunk_tiles = []
-        for lr_file in lr_chunk:
-            lr_frame = cv.imread(lr_file)
-            h_orig, w_orig, _ = lr_frame.shape
-            lr_frame = cv.cvtColor(lr_frame, cv.COLOR_BGR2RGB)
-            lr_tiles = frame_to_tiles(lr_frame, tile_size, tile_padding)
-            lr_chunk_tiles.append(lr_tiles)
-        lr_chunk_tiles = np.array(lr_chunk_tiles)  # (T, N, H, W, C)
-
-        # Process each group of tiles
-        vsr_chunk_tiles = []
-        for i in range(lr_chunk_tiles.shape[1]):
-            # LR tensor
-            lr_tiles = lr_chunk_tiles[:, i]  # (T, H, W, C)
-            lr_tensor = torch.from_numpy(lr_tiles.astype(np.float32) / 255.0).permute(0, 3, 1, 2)  # (T, C, H, W)
-            lr_tensor = lr_tensor.unsqueeze(0)  # (B, T, C, H, W)
-
-            # Infer model
-            with torch.no_grad():
-                outputs = model.forward(lr_tensor.to(device))
-            outputs = outputs.squeeze(dim=0)  # (T, C, H, W)
-            outputs = torch.clamp(outputs, 0., 1.)
-
-            # Process model output
-            vsr_tiles = outputs.permute(0, 2, 3, 1)
-            vsr_tiles = 255 * vsr_tiles.cpu().detach().numpy()
-            vsr_tiles = vsr_tiles.astype(np.uint8)
-            vsr_chunk_tiles.append(vsr_tiles)
-        vsr_chunk_tiles = np.array(vsr_chunk_tiles)  # (N, T, 4*H, 4*W, C)
-
-        # Save frames
-        for i in range(vsr_chunk_tiles.shape[1]):
-            vsr_tiles = vsr_chunk_tiles[:, i]
-            vsr_frame = tiles_to_frame(vsr_tiles, 4 * h_orig, 4 * w_orig, 4 * tile_padding)
-            vsr_frame = cv.cvtColor(vsr_frame, cv.COLOR_RGB2BGR)
-            img_path = os.path.join(res_folder, filename_template % cnt)
-            cv.imwrite(img_path, vsr_frame)
-            cnt += 1
-            pbar.update(1)
-    pbar.close()
-    logger.info(f"Decoded {cnt} super resolution frames")
 
 
 def detect_liplates(root: str,
@@ -620,6 +415,50 @@ def compute_residuals(root: str,
     logger.info(f"Residuals saved to '{out_residuals_dir}'")
 
 
+def encode_folder(src_files, out_path, crf: int, preset: str = 'ultrafast', pix_fmt: str = 'gbrp'):
+    call([
+        'ffmpeg',
+        '-i', src_files,
+        '-pix_fmt', pix_fmt,
+        '-c:v', 'libx265',
+        '-preset', preset,
+        '-crf', str(crf),
+        '-y', out_path
+    ])
+
+    return out_path
+
+
+def encode_frames(src_root: str,
+                  video_path: str,
+                  crf: int,
+                  preset='medium',
+                  pix_fmt: str = 'gbrp',
+                  save_to_frames=True,
+                  frames_path: str = '',
+                  filename_template: str = "im%05d.png"):
+    logger = logging.getLogger(_LOGGER_NAME)
+
+    # Scan frames
+    src_files = os.path.join(src_root, filename_template)
+
+    # Call encoder
+    logger.info(f"Encoding '{src_files}' frames to '{video_path}'")
+    os.makedirs(os.path.dirname(video_path), exist_ok=True)
+    encode_folder(src_files, video_path, crf=crf, preset=preset, pix_fmt=pix_fmt)
+
+    # Encoded video to frames
+    if save_to_frames:
+        shutil.rmtree(frames_path, ignore_errors=True)
+        os.makedirs(frames_path, exist_ok=True)
+        video_to_frames(video_path, frames_path, '', filename_template)
+
+        # Check lengths
+        src_length = len(sorted(glob(src_root)))
+        dst_length = len(sorted(glob(frames_path)))
+        assert src_length == dst_length
+
+
 def create_gradient_mask(w, h, border_size: int):
     if border_size > 0:
         mask = np.zeros(shape=(h, w, 1), dtype=np.float32)
@@ -709,75 +548,6 @@ def fuse_layers(root: str,
     logger.info(f'Created {cnt} result frames')
 
 
-def create_cutout_layer_frames(root: str,
-                               faces_enable: bool = True,
-                               liplates_enable: bool = True,
-                               filename_template: str = "%05d.png"):
-    logger = logging.getLogger(_LOGGER_NAME)
-
-    # Scan files
-    hr_folder = os.path.join(root, _PATHS_ARTIFACTS_SOURCE_FRAMES)
-    hr_filelist = sorted(glob(os.path.join(hr_folder, "*")))
-
-    if liplates_enable:
-        liplates_coords_folder = os.path.join(root, _PATHS_ENCODED_DIR, 'liplates_coords')
-        liplates_coords_filelist = sorted(glob(os.path.join(liplates_coords_folder, "*")))
-        assert len(liplates_coords_filelist) == len(hr_filelist)
-
-    if faces_enable:
-        faces_coords_folder = os.path.join(root, _PATHS_ENCODED_DIR, 'faces_coords')
-        faces_coords_filelist = sorted(glob(os.path.join(faces_coords_folder, "*")))
-        assert len(faces_coords_filelist) == len(hr_filelist)
-
-    # Create result dir
-    res_folder = os.path.join(root, _PATHS_ARTIFACTS_CUTOUT)
-    shutil.rmtree(res_folder, ignore_errors=True)
-    os.makedirs(res_folder, exist_ok=True)
-
-    # Process frames
-    logger.info('Creating cutout layer frames...')
-    save_cnt = 0
-    pbar = tqdm(total=len(hr_filelist))
-    for file_idx, hr_file in enumerate(hr_filelist):
-        # Read frame
-        hr_frame = cv.imread(hr_file)
-
-        # Read liplates bounding boxes
-        lp_bboxes = []
-        if liplates_enable:
-            f = open(liplates_coords_filelist[file_idx], 'rb')
-            lp_bboxes = pickle.load(f)
-            f.close()
-
-        # Read faces bounding boxes
-        face_bboxes = []
-        if faces_enable:
-            f = open(faces_coords_filelist[file_idx], 'rb')
-            face_bboxes = pickle.load(f)
-            f.close()
-
-        # Create foreground mask
-        h, w, c = hr_frame.shape
-        mask = np.zeros(shape=(h, w, 1), dtype=np.float32)
-        for [x1, y1, x2, y2] in lp_bboxes:
-            mask[y1:y2, x1:x2] = 1.0
-        for [x1, y1, x2, y2] in face_bboxes:
-            mask[y1:y2, x1:x2] = 1.0
-
-        # Create result frame
-        result_frame = hr_frame.astype(np.float32) * mask
-        result_frame = result_frame.astype(np.uint8)
-
-        # Save mask
-        img_path = os.path.join(res_folder, filename_template % save_cnt)
-        cv.imwrite(img_path, result_frame)
-        save_cnt += 1
-
-        pbar.update(1)
-    pbar.close()
-    logger.info(f"Cutout layer frames saved to '{res_folder}'")
-
-
 def get_dir_size(start_path: str = '.'):
     total_size = 0
     for dirpath, dirnames, filenames in os.walk(start_path):
@@ -802,11 +572,8 @@ def calc_bitrate_metrics(root: str,
 
     src_size = 8 * os.path.getsize(video_path)
     enhancement_layer_size = 8 * os.path.getsize(os.path.join(root, _PATHS_ENCODED_DIR, 'enhancement_layer.h265'))
-    base_layer_size = 0
     base_layer_folder = os.path.join(root, _PATHS_ENCODED_DIR, 'dcvc_hem_bins')
-    base_layer_filelist = sorted(glob(os.path.join(base_layer_folder, "*")))
-    for base_layer_file in base_layer_filelist:
-        base_layer_size += 8 * os.path.getsize(base_layer_file)
+    base_layer_size = 8 * get_dir_size(base_layer_folder)
     encoded_size = enhancement_layer_size + base_layer_size
 
     src_bpp = src_size / total_pixels
@@ -1016,83 +783,6 @@ def main():
                             video_path=args.video_path,
                             liplates_padding=codec_settings.ENHANCEMENT_LAYER.DETECTORS.LIPLATES.PADDING,
                             faces_padding=codec_settings.ENHANCEMENT_LAYER.DETECTORS.FACES.PADDING)
-
-
-
-    #     # ---------------- ENCODER [VIDEO LAYER] ----------------
-    #     video_to_frames(video_path=args.video_path,
-    #                     result_root=args.result_root,
-    #                     subdir=_PATHS_ARTIFACTS_SOURCE_FRAMES)
-    #
-    #     downsample_and_save_frames(result_root=args.result_root,
-    #                                downsample_factor=4)
-    #
-        # encode_frames(src_root=os.path.join(args.result_root, _PATHS_ARTIFACTS_LR),
-        #               video_path=os.path.join(args.result_root, _PATHS_ENCODED_DIR, 'video_layer.h265'),
-        #               crf=codec_settings.VIDEO_LAYER.H265.CRF,
-        #               preset=codec_settings.VIDEO_LAYER.H265.PRESET,
-        #               pix_fmt=codec_settings.VIDEO_LAYER.H265.PIX_FMT,
-        #               save_to_frames=True,
-        #               frames_path=os.path.join(args.result_root, _PATHS_ARTIFACTS_LR_ENCODED))
-    #
-    #     # ---------------- ENCODER [CUTOUT LAYER] ----------------
-    #     if codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.ENABLE:
-    #         detect_liplates(root=args.result_root,
-    #                         prob=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.PROB,
-    #                         padding=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.PADDING,
-    #                         device=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.DEVICE)
-    #
-    #     if codec_settings.CUTOUT_LAYER.DETECTORS.FACES.ENABLE:
-    #         detect_faces(root=args.result_root,
-    #                      prob=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.PROB,
-    #                      padding=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.PADDING,
-    #                      device=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.DEVICE)
-    #
-    #     create_cutout_layer_frames(root=args.result_root,
-    #                                faces_enable=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.ENABLE,
-    #                                liplates_enable=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.ENABLE)
-    #
-    #     encode_frames(src_root=os.path.join(args.result_root, _PATHS_ARTIFACTS_CUTOUT),
-    #                   video_path=os.path.join(args.result_root, _PATHS_ENCODED_DIR, 'cutout_layer.h265'),
-    #                   crf=codec_settings.CUTOUT_LAYER.H265.CRF,
-    #                   preset=codec_settings.CUTOUT_LAYER.H265.PRESET,
-    #                   pix_fmt=codec_settings.CUTOUT_LAYER.H265.PIX_FMT,
-    #                   save_to_frames=True,
-    #                   frames_path=os.path.join(args.result_root, _PATHS_ARTIFACTS_CUTOUT_ENCODED))
-    #
-        # calc_bitrate_metrics(root=args.result_root,
-        #                      video_path=args.video_path)
-    #
-    # # Decode
-    # if args.do_decode:
-    #     # ---------------- DECODER ----------------
-    #     do_vsr(result_root=args.result_root,
-    #            model_arch=codec_settings.VIDEO_LAYER.VSR_MODEL.ARCHITECTURE,
-    #            model_num_blocks=codec_settings.VIDEO_LAYER.VSR_MODEL.NUM_BLOCKS,
-    #            model_mid_channels=codec_settings.VIDEO_LAYER.VSR_MODEL.MID_CHANNELS,
-    #            chunk_size=codec_settings.VIDEO_LAYER.VSR_MODEL.CHUNK_SIZE,
-    #            tile_size=codec_settings.VIDEO_LAYER.VSR_MODEL.TILE_SIZE,
-    #            tile_padding=codec_settings.VIDEO_LAYER.VSR_MODEL.TILE_PADDING,
-    #            weights_path=codec_settings.VIDEO_LAYER.VSR_MODEL.WEIGHTS_PATH,
-    #            device=codec_settings.VIDEO_LAYER.VSR_MODEL.DEVICE)
-    #
-        # fuse_layers(root=args.result_root,
-        #             faces_enable=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.ENABLE,
-        #             liplates_enable=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.ENABLE,
-        #             faces_padding=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.PADDING,
-        #             liplates_padding=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.PADDING)
-    #
-        # encode_frames(src_root=os.path.join(args.result_root, _PATHS_ARTIFACTS_RESULT),
-        #               video_path=os.path.join(args.result_root, _PATHS_DECODED_DIR, 'svs_decoded.h265'),
-        #               crf=0,
-        #               preset='medium',
-        #               pix_fmt='gbrp',
-        #               save_to_frames=False)
-    #
-        # calc_visual_metrics(root=args.result_root,
-        #                     video_path=args.video_path,
-        #                     liplates_padding=codec_settings.CUTOUT_LAYER.DETECTORS.LIPLATES.PADDING,
-        #                     faces_padding=codec_settings.CUTOUT_LAYER.DETECTORS.FACES.PADDING)
 
 
 if __name__ == '__main__':
