@@ -303,12 +303,13 @@ def calculate_mean_ap(annotations, dataset, video_name):
         metric_map_50.update(annotations[model], dataset_annotations)
         map_metrics = metric_map.compute()
         map_metrics_50 = metric_map_50.compute()
-        for class_mean_ap, class_id in zip(map_metrics['map_per_class'], map_metrics['classes']):
-            class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
-            mean_ap[model]['class_map'][class_name] = class_mean_ap.item() * 100
-        for class_mean_ap, class_id in zip(map_metrics_50['map_per_class'], map_metrics_50['classes']):
-            class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
-            mean_ap[model]['class_map_50'][class_name] = class_mean_ap.item() * 100
+        if model in ['rcnn', 'yolo_detection']:
+            for class_mean_ap, class_id in zip(map_metrics['map_per_class'], map_metrics['classes']):
+                class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
+                mean_ap[model]['class_map'][class_name] = class_mean_ap.item() * 100
+            for class_mean_ap, class_id in zip(map_metrics_50['map_per_class'], map_metrics_50['classes']):
+                class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
+                mean_ap[model]['class_map_50'][class_name] = class_mean_ap.item() * 100
         model_map_50 = map_metrics['map_50'].item()
         model_map = map_metrics['map'].item()
         mean_ap[model]['map_50'] = model_map_50 * 100
@@ -420,10 +421,10 @@ def get_metrics(decod_dir: str,
                         yolo_detection_output = forward_yolo(yolo_detection, image, labels_start_index)
                         annotations['rcnn'].append(rcnn_output)
                         annotations['yolo_detection'].append(yolo_detection_output)
-                    elif "license_detection" in annotation_types:
+                    if "license_detection" in annotation_types:
                         yolo_lp_detection_output = forward_yolo(yolo_lp_detection, image, 0)
                         annotations['yolo_lp_detection'].append(yolo_lp_detection_output)
-                    elif "license_recognition" in annotation_types:
+                    if "license_recognition" in annotation_types:
                         boxes = dataset[video_folder.name]["annotations"]["license_recognition"][i]["boxes"]
                         ocr_result = forward_ocr(ocr, image, boxes)
                         annotations['ocr_result'].append(ocr_result)
