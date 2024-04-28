@@ -1,4 +1,14 @@
-CUTOUT_LAYER:
+BASE_LAYER:
+  DCVC_HEM:
+    I_FRAME_WEIGHTS: 'pretrained/acmmm2022_image_psnr.pth'
+    P_FRAME_WEIGHTS: 'pretrained/pretrained_fix_fpn_0_5_dist_0_5e-5_full_eval_epoch_10.pth'
+    ANCHOR_NUM: 4
+    GOP: 32
+    RATE_COUNT: 6
+    QUALITY: 1
+    WRITE_STREAM: True
+    DEVICE: 'cuda'
+ENHANCEMENT_LAYER:
   DETECTORS:
     FACES:
       DEVICE: 'cuda'
@@ -11,20 +21,10 @@ CUTOUT_LAYER:
       PADDING: 10
       PROB: 0.7
   H265:
-    CRF: 21
-    PIX_FMT: 'gbrp'
-    PRESET: 'veryfast'
-VIDEO_LAYER:
-  H265:
     CRF: 23
     PIX_FMT: 'gbrp'
     PRESET: 'veryfast'
-  VSR_MODEL:
-    ARCHITECTURE: 'FTVSR'
-    DEVICE: 'cuda'
-    CHUNK_SIZE: 10
-    MID_CHANNELS: 64
-    NUM_BLOCKS: 60
-    TILE_PADDING: 16
-    TILE_SIZE: 160
-    WEIGHTS_PATH: 'outputs/rftvsr_3/model_009591.pth'
+COMPARE:
+  H265:
+    PIX_FMT: 'gbrp'
+    PRESET: 'veryfast'

@@ -29,6 +29,7 @@ _PATHS_ARTIFACTS_DCVC_HEM = "artifacts/dcvc_hem"
 _PATHS_ARTIFACTS_RESIDUALS = "artifacts/residuals"
 _PATHS_ARTIFACTS_RESIDUALS_ENCODED = "artifacts/residuals_h265"
 _PATHS_ARTIFACTS_RESULT = "artifacts/result_frames"
+_PATHS_ARTIFACTS_SAME_BITRATE = "artifacts/same_bitrate"
 _PATHS_ENCODED_DIR = "encoded"
 _PATHS_DECODED_DIR = "decoded"
 _PATHS_INFO = "info"
@@ -415,7 +416,7 @@ def compute_residuals(root: str,
     logger.info(f"Residuals saved to '{out_residuals_dir}'")
 
 
-def encode_folder(src_files, out_path, crf: int, preset: str = 'ultrafast', pix_fmt: str = 'gbrp'):
+def encode_folder_crf(src_files, out_path, crf: int, preset: str = 'ultrafast', pix_fmt: str = 'gbrp'):
     call([
         'ffmpeg',
         '-i', src_files,
@@ -423,6 +424,20 @@ def encode_folder(src_files, out_path, crf: int, preset: str = 'ultrafast', pix_
         '-c:v', 'libx265',
         '-preset', preset,
         '-crf', str(crf),
+        '-y', out_path
+    ])
+
+    return out_path
+
+
+def encode_folder_bitrate(src_files, out_path, bitrate: int, preset: str = 'ultrafast', pix_fmt: str = 'gbrp'):
+    call([
+        'ffmpeg',
+        '-i', src_files,
+        '-pix_fmt', pix_fmt,
+        '-c:v', 'libx265',
+        '-preset', preset,
+        '-b:v', str(bitrate) + 'k',
         '-y', out_path
     ])
 
@@ -445,7 +460,7 @@ def encode_frames(src_root: str,
     # Call encoder
     logger.info(f"Encoding '{src_files}' frames to '{video_path}'")
     os.makedirs(os.path.dirname(video_path), exist_ok=True)
-    encode_folder(src_files, video_path, crf=crf, preset=preset, pix_fmt=pix_fmt)
+    encode_folder_crf(src_files, video_path, crf=crf, preset=preset, pix_fmt=pix_fmt)
 
     # Encoded video to frames
     if save_to_frames:
@@ -548,6 +563,46 @@ def fuse_layers(root: str,
     logger.info(f'Created {cnt} result frames')
 
 
+def encode_same_bitrate(root: str,
+                        source_video_path: str,
+                        out_video_path: str,
+                        preset='medium',
+                        pix_fmt: str = 'gbrp',
+                        save_to_frames=True,
+                        frames_path: str = '',
+                        filename_template: str = "im%05d.png"):
+    logger = logging.getLogger(_LOGGER_NAME)
+
+    logger.info('Encode H.265 with same bitrate as encoded video...')
+
+    # Get source video duration
+    cap = cv.VideoCapture(source_video_path)
+    fps = cap.get(cv.CAP_PROP_FPS)
+    frame_count = int(cap.get(cv.CAP_PROP_FRAME_COUNT))
+    duration = frame_count / fps
+
+    # Calculate bitrate
+    enhancement_layer_size = 8 * os.path.getsize(os.path.join(root, _PATHS_ENCODED_DIR, 'enhancement_layer.h265'))
+    base_layer_size = 8 * get_dir_size(os.path.join(root, _PATHS_ENCODED_DIR, 'dcvc_hem_bins'))
+    encoded_size = enhancement_layer_size + base_layer_size
+    bitrate = int(encoded_size / duration / 1000)  # kBit
+
+    # Call encoder
+    src_files = os.path.join(root, _PATHS_ARTIFACTS_RESULT, filename_template)
+    encode_folder_bitrate(src_files, out_video_path, bitrate=bitrate, preset=preset, pix_fmt=pix_fmt)
+
+    # Encoded video with same bitrate to frames
+    if save_to_frames:
+        shutil.rmtree(frames_path, ignore_errors=True)
+        os.makedirs(frames_path, exist_ok=True)
+        video_to_frames(out_video_path, frames_path, '', filename_template)
+
+        # Check lengths
+        src_length = len(sorted(glob(os.path.join(root, _PATHS_ARTIFACTS_RESULT))))
+        dst_length = len(sorted(glob(frames_path)))
+        assert src_length == dst_length
+
+
 def get_dir_size(start_path: str = '.'):
     total_size = 0
     for dirpath, dirnames, filenames in os.walk(start_path):
@@ -610,6 +665,9 @@ def calc_visual_metrics(root: str,
     result_folder = os.path.join(root, _PATHS_ARTIFACTS_RESULT)
     result_filelist = sorted(glob(os.path.join(result_folder, "*.png")))
 
+    same_bitrate_folder = os.path.join(root, _PATHS_ARTIFACTS_SAME_BITRATE)
+    same_bitrate_filelist = sorted(glob(os.path.join(same_bitrate_folder, "*.png")))
+
     liplates_coords_folder = os.path.join(root, _PATHS_ENCODED_DIR, 'liplates_coords')
     liplates_coords_filelist = sorted(glob(os.path.join(liplates_coords_folder, "*")))
 
@@ -619,12 +677,13 @@ def calc_visual_metrics(root: str,
     # Process frames
     logger.info('Calculating PSNR metrics...')
 
-    psnrs, psnrs_dcvc_hem, psnrs_enhancement = [], [], []
+    psnrs, psnrs_dcvc_hem, psnrs_enhancement, psnrs_same_bitrate = [], [], [], []
     pbar = tqdm(total=len(source_filelist))
     for file_idx, _ in enumerate(source_filelist):
         # Read frames
         hr_frame = cv.imread(source_filelist[file_idx])
         result_frame = cv.imread(result_filelist[file_idx])
+        same_bitrate_frame = cv.imread(same_bitrate_filelist[file_idx])
 
         # Read liplates bounding boxes
         lp_bboxes = []
@@ -657,14 +716,17 @@ def calc_visual_metrics(root: str,
         mse = (hr_frame.astype(np.float32) / 255.0 - result_frame.astype(np.float32) / 255.0) ** 2
         mse_dcvc_hem = mse * (1.0 - mask)
         mse_enhancement = mse * mask
+        mse_same_bitrate = (hr_frame.astype(np.float32) / 255.0 - same_bitrate_frame.astype(np.float32) / 255.0) ** 2
 
         psnr = 10 * np.log10(1.0 / np.mean(mse))
         psnr_dcvc_hem = 10 * np.log10(1.0 / (np.sum(mse_dcvc_hem) / mask_zeros))
         psnr_enhancement = 10 * np.log10(1.0 / (np.sum(mse_enhancement) / mask_nonzeros))
+        psnr_same_bitrate = 10 * np.log10(1.0 / np.mean(mse_same_bitrate))
 
         psnrs.append(psnr)
         psnrs_dcvc_hem.append(psnr_dcvc_hem)
         psnrs_enhancement.append(psnr_enhancement)
+        psnrs_same_bitrate.append(psnr_same_bitrate)
 
         pbar.update(1)
     pbar.close()
@@ -677,6 +739,7 @@ def calc_visual_metrics(root: str,
         f.write(f'Total PSNR [RGB format]: {np.mean(psnrs)}\n')
         f.write(f'DCVC-HEM PSNR [RGB format]: {np.mean(psnrs_dcvc_hem)}\n')
         f.write(f'Enhancement layer PSNR [RGB format]: {np.mean(psnrs_enhancement)}\n')
+        f.write(f'H265 encoded with same bitrate as total PSNR [RGB format]: {np.mean(psnrs_same_bitrate)}\n')
 
 
 def str2bool(s):
@@ -773,11 +836,19 @@ def main():
                     liplates_padding=codec_settings.ENHANCEMENT_LAYER.DETECTORS.LIPLATES.PADDING)
 
         encode_frames(src_root=os.path.join(args.result_root, _PATHS_ARTIFACTS_RESULT),
-                      video_path=os.path.join(args.result_root, _PATHS_DECODED_DIR, 'svs_decoded.h265'),
+                      video_path=os.path.join(args.result_root, _PATHS_DECODED_DIR, 'vcm-ts_decoded.h265'),
                       crf=0,
                       preset='medium',
                       pix_fmt='gbrp',
                       save_to_frames=False)
+
+        encode_same_bitrate(root=args.result_root,
+                            source_video_path=args.video_path,
+                            out_video_path=os.path.join(args.result_root, _PATHS_DECODED_DIR, 'same_bitrate.h265'),
+                            preset=codec_settings.COMPARE.H265.PRESET,
+                            pix_fmt=codec_settings.COMPARE.H265.PIX_FMT,
+                            save_to_frames=True,
+                            frames_path=os.path.join(args.result_root, _PATHS_ARTIFACTS_SAME_BITRATE))
 
         calc_visual_metrics(root=args.result_root,
                             video_path=args.video_path,

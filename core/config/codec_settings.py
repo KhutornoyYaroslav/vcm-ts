@@ -55,3 +55,15 @@ _CFG.ENHANCEMENT_LAYER.H265 = CN()
 _CFG.ENHANCEMENT_LAYER.H265.CRF = 25
 _CFG.ENHANCEMENT_LAYER.H265.PIX_FMT = 'gbrp'
 _CFG.ENHANCEMENT_LAYER.H265.PRESET = 'veryfast'
+
+# ---------------------------------------------------------------------------- #
+# COMPARE
+# ---------------------------------------------------------------------------- #
+_CFG.COMPARE = CN()
+
+# ---------------------------------------------------------------------------- #
+# COMPARE [h265]
+# ---------------------------------------------------------------------------- #
+_CFG.COMPARE.H265 = CN()
+_CFG.COMPARE.H265.PIX_FMT = 'gbrp'
+_CFG.COMPARE.H265.PRESET = 'veryfast'
