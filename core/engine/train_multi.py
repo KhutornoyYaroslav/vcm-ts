@@ -156,8 +156,7 @@ def get_stage_params(cfg,
 
     # Learning rate
     world_size = int(os.environ['WORLD_SIZE'])
-    # optimizer.param_groups[0]["lr"] = float(stage_params[5]) * math.sqrt(world_size)
-    optimizer.param_groups[0]["lr"] = float(stage_params[5])
+    optimizer.param_groups[0]["lr"] = float(stage_params[5]) * math.sqrt(world_size)
 
     # Perceptual loss
     if stage_params[7] == 'true':
