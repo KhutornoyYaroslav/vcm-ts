@@ -8,7 +8,9 @@ from torchmetrics.detection import MeanAveragePrecision
 from tqdm import tqdm
 from ultralytics import YOLO
 
-from DCVC_HEM.src.utils.stream_helper import get_padding_size
+from DCVC_HEM.src.models.image_model import IntraNoAR
+from DCVC_HEM.src.utils.common import interpolate_log
+from DCVC_HEM.src.utils.stream_helper import get_padding_size, get_state_dict
 from core.engine.losses import FasterRCNNFPNPerceptualLoss, FasterRCNNPerceptualLoss
 from core.utils.tensorboard import add_best_and_worst_sample
 
@@ -112,6 +114,21 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
 
         add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
 
+    if i_frame_net is None:
+        rate_count = len(cfg.SOLVER.LAMBDAS)
+        i_frame_q_scales = IntraNoAR.get_q_scales_from_ckpt('pretrained/acmmm2022_image_psnr.pth')
+        if len(i_frame_q_scales) == rate_count:
+            pass
+        else:
+            max_q_scale = i_frame_q_scales[0]
+            min_q_scale = i_frame_q_scales[-1]
+            i_frame_q_scales = interpolate_log(min_q_scale, max_q_scale, rate_count)
+
+        i_state_dict = get_state_dict('pretrained/acmmm2022_image_psnr.pth')
+        i_frame_net = IntraNoAR()
+        i_frame_net.load_state_dict(i_state_dict, strict=False)
+        i_frame_net = i_frame_net.cuda()
+        i_frame_net.eval()
     if object_detection_loader is not None and stage >= cfg.DATASET.OD_STAGE:
         if (isinstance(model.perceptual_loss, FasterRCNNFPNPerceptualLoss) or
                 isinstance(model.perceptual_loss, FasterRCNNPerceptualLoss)):
