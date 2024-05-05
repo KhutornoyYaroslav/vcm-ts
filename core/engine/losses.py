@@ -196,7 +196,8 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
         f = self.slice5(f)
         f_out5 = f
 
-        return [f_out1, f_out2, f_out3, f_out4, f_out5]
+        # return [f_out1, f_out2, f_out3, f_out4, f_out5]
+        return [f_out4, f_out5]
 
     @staticmethod
     def normalize_features(in_feat, eps=1e-10):
