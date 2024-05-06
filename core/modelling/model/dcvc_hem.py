@@ -221,7 +221,8 @@ class DCVC_HEM(nn.Module):
                 dist = output[loss_dist_key]
 
                 if perceptual_loss:
-                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'],
+                                                           feature_layers=self.cfg.SOLVER.PL_LAYERS)
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -313,7 +314,8 @@ class DCVC_HEM(nn.Module):
         dist = output[loss_dist_key]
 
         if perceptual_loss:
-            perceptual_dist = self.perceptual_loss(target, output['dpb']['ref_frame'])
+            perceptual_dist = self.perceptual_loss(target, output['dpb']['ref_frame'],
+                                                   feature_layers=self.cfg.SOLVER.PL_LAYERS)
         else:
             perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -435,7 +437,8 @@ class DCVC_HEM(nn.Module):
                 dist = output[loss_dist_key]
 
                 if perceptual_loss:
-                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'],
+                                                           feature_layers=self.cfg.SOLVER.PL_LAYERS)
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -553,7 +556,8 @@ class DCVC_HEM(nn.Module):
             dist = output[loss_dist_key]
 
             if perceptual_loss:
-                perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'],
+                                                       feature_layers=self.cfg.SOLVER.PL_LAYERS)
             else:
                 perceptual_dist = torch.zeros_like(self.lambdas)
 

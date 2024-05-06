@@ -129,11 +129,11 @@ def main():
                         default="data/huawei/outputs/benchmark/mp4",
                         help="Path to dataset root directory with videos")
     parser.add_argument('--dst-root', dest='dst_root', type=str,
-                        default="data/huawei_septuplet",
+                        default="data/huawei_septuplet_32",
                         help="Path where to save result dataset")
     parser.add_argument('--min-height', dest='min_height', type=float, default=256,
                         help="Resize factor for output images")
-    parser.add_argument('--seq-length', dest='seq_length', type=int, default=7,
+    parser.add_argument('--seq-length', dest='seq_length', type=int, default=32,
                         help="Number of frames in output sequences")
     args = parser.parse_args()
 

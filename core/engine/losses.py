@@ -128,7 +128,7 @@ class FasterRCNNFPNPerceptualLossOld(torch.nn.Module):
         for p in self.features.parameters():
             p.requires_grad = False
 
-    def forward(self, target, input, feature_layers=['0', '1', '2', '3', 'pool']):  # ['0', '1', '2', '3', 'pool']
+    def forward(self, target, input, feature_layers=['0', '1', '2', '3', 'pool']):
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)
@@ -196,8 +196,13 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
         f = self.slice5(f)
         f_out5 = f
 
-        # return [f_out1, f_out2, f_out3, f_out4, f_out5]
-        return [f_out4, f_out5]
+        return {
+            '1': f_out1,
+            '2': f_out2,
+            '3': f_out3,
+            '4': f_out4,
+            '5': f_out5
+        }
 
     @staticmethod
     def normalize_features(in_feat, eps=1e-10):
@@ -208,7 +213,8 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
         for param in self.parameters():
             param.requires_grad = False
 
-    def forward(self, input, target, normalize: bool = True, resize: bool = True):
+    def forward(self, input, target, normalize: bool = True, resize: bool = True,
+                feature_layers=['1', '2', '3', '4', '5']):
         # check shape
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
@@ -232,12 +238,13 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
 
         # calc loss
         loss = []
-        for f_input, f_target in zip(fs_input, fs_target):
-            f_input_norm = self.normalize_features(f_input)
-            f_target_norm = self.normalize_features(f_target)
-            loss_ = torch.nn.functional.mse_loss(f_input_norm, f_target_norm, reduction='none')
-            loss_ = torch.mean(loss_, dim=(1, 2, 3))
-            loss.append(loss_)
+        for key in fs_input.keys():
+            if key in feature_layers:
+                f_input_norm = self.normalize_features(fs_input[key])
+                f_target_norm = self.normalize_features(fs_target[key])
+                loss_ = torch.nn.functional.mse_loss(f_input_norm, f_target_norm, reduction='none')
+                loss_ = torch.mean(loss_, dim=(1, 2, 3))
+                loss.append(loss_)
 
         loss = torch.stack(loss)
         loss = torch.sum(loss, 0)
