@@ -367,7 +367,7 @@ def do_train(cfg,
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
         for iteration, data_entry in pbar:
-            global_step = epoch * iters_per_epoch + iteration * args.num_gpus
+            global_step = epoch * iters_per_epoch + (iteration + 1) * args.num_gpus
 
             # Get data
             input, target = data_entry  # (N, T, C, H, W)
