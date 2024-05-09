@@ -5,7 +5,8 @@ import torch
 from torch import nn
 
 from DCVC_HEM.src.models.video_model import DMC
-from core.engine.losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss, YOLOV8PerceptualLoss, LPIPSPerceptualLoss
+from core.engine.losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss, YOLOV8PerceptualLoss, \
+    LPIPSPerceptualLoss, FasterRCNNResNetPerceptualLoss
 
 
 class DCVC_HEM(nn.Module):
@@ -60,7 +61,9 @@ class DCVC_HEM(nn.Module):
     def get_perceptual_loss(this, cfg):
         if cfg.SOLVER.PL_MODEL == 'vgg':
             perceptual_loss = VGGPerceptualLoss()
-        elif cfg.SOLVER.PL_MODEL == 'rcnn':
+        elif cfg.SOLVER.PL_MODEL == 'resnet':
+            perceptual_loss = FasterRCNNResNetPerceptualLoss()
+        elif cfg.SOLVER.PL_MODEL == 'fpn':
             perceptual_loss = FasterRCNNFPNPerceptualLoss()
         elif cfg.SOLVER.PL_MODEL == 'yolo':
             perceptual_loss = YOLOV8PerceptualLoss()

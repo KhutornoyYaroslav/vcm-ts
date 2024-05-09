@@ -11,7 +11,7 @@ from ultralytics import YOLO
 from DCVC_HEM.src.models.image_model import IntraNoAR
 from DCVC_HEM.src.utils.common import interpolate_log
 from DCVC_HEM.src.utils.stream_helper import get_padding_size, get_state_dict
-from core.engine.losses import FasterRCNNFPNPerceptualLoss, FasterRCNNPerceptualLoss
+from core.engine.losses import FasterRCNNFPNPerceptualLoss, FasterRCNNResNetPerceptualLoss
 from core.utils.tensorboard import add_best_and_worst_sample
 
 
@@ -131,7 +131,7 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
         i_frame_net.eval()
     if object_detection_loader is not None and stage >= cfg.DATASET.OD_STAGE:
         if (isinstance(model.perceptual_loss, FasterRCNNFPNPerceptualLoss) or
-                isinstance(model.perceptual_loss, FasterRCNNPerceptualLoss)):
+                isinstance(model.perceptual_loss, FasterRCNNResNetPerceptualLoss)):
             detector = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(min_size=1088, max_size=1920)
             detector.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
             detector.cuda()
@@ -183,7 +183,7 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
                     input_to_detect = dpb[i]["ref_frame"]  # (N, C, H, W)
                     input_to_detect = input_to_detect.clamp(0, 1)
                     if (isinstance(model.perceptual_loss, FasterRCNNFPNPerceptualLoss) or
-                            isinstance(model.perceptual_loss, FasterRCNNPerceptualLoss)):
+                            isinstance(model.perceptual_loss, FasterRCNNResNetPerceptualLoss)):
                         output = forward_rcnn(detector, input_to_detect)
                     else:
                         output = forward_yolo(detector, input_to_detect)

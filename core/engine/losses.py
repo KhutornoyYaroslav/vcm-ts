@@ -56,9 +56,9 @@ class VGGPerceptualLoss(torch.nn.Module):
         return loss  # (N)
 
 
-class FasterRCNNPerceptualLoss(torch.nn.Module):
+class FasterRCNNPerceptualLossOld(torch.nn.Module):
     def __init__(self, resize=True):
-        super(FasterRCNNPerceptualLoss, self).__init__()
+        super(FasterRCNNPerceptualLossOld, self).__init__()
         self.transform = torch.nn.functional.interpolate
         self.resize = resize
         # Create model
@@ -156,9 +156,9 @@ class FasterRCNNFPNPerceptualLossOld(torch.nn.Module):
         return loss
 
 
-class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
+class FasterRCNNResNetPerceptualLoss(torch.nn.Module):
     def __init__(self, requires_grad: bool = False):
-        super(FasterRCNNFPNPerceptualLoss, self).__init__()
+        super(FasterRCNNResNetPerceptualLoss, self).__init__()
         # initialize model
         model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
         model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
@@ -235,6 +235,70 @@ class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
         # get features
         fs_input = self.forward_features_(input)
         fs_target = self.forward_features_(target)
+
+        # calc loss
+        loss = []
+        for key in fs_input.keys():
+            if key in feature_layers:
+                f_input_norm = self.normalize_features(fs_input[key])
+                f_target_norm = self.normalize_features(fs_target[key])
+                loss_ = torch.nn.functional.mse_loss(f_input_norm, f_target_norm, reduction='none')
+                loss_ = torch.mean(loss_, dim=(1, 2, 3))
+                loss.append(loss_)
+
+        loss = torch.stack(loss)
+        loss = torch.sum(loss, 0)
+
+        return loss
+
+
+class FasterRCNNFPNPerceptualLoss(torch.nn.Module):
+    def __init__(self, requires_grad: bool = False):
+        super(FasterRCNNFPNPerceptualLoss, self).__init__()
+        # initialize model
+        model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2()
+        model.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
+        # get features
+        self.features = model.backbone
+        # disable grads
+        if not requires_grad:
+            for param in self.parameters():
+                param.requires_grad = False
+        # norm
+        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+
+    @staticmethod
+    def normalize_features(in_feat, eps=1e-10):
+        norm_factor = torch.sqrt(torch.sum(in_feat ** 2, dim=1, keepdim=True))
+        return in_feat / (norm_factor + eps)
+
+    def disable_gradients(self):
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def forward(self, input, target, normalize: bool = True, resize: bool = True,
+                feature_layers=['0', '1', '2', '3', 'pool']):
+        # check shape
+        if input.shape[1] != 3:
+            input = input.repeat(1, 3, 1, 1)
+            target = target.repeat(1, 3, 1, 1)
+
+        # clump
+        input = input.clamp(0, 1)
+        target = target.clamp(0, 1)
+
+        # transforms
+        if normalize:
+            input = (input - self.mean) / self.std
+            target = (target - self.mean) / self.std
+        if resize:
+            input = torch.nn.functional.interpolate(input, mode='bilinear', size=(224, 224), align_corners=False)
+            target = torch.nn.functional.interpolate(target, mode='bilinear', size=(224, 224), align_corners=False)
+
+        # get features
+        fs_input = self.features.forward(input)
+        fs_target = self.features.forward(target)
 
         # calc loss
         loss = []
