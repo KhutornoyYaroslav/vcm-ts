@@ -470,6 +470,7 @@ def do_train(cfg,
                 add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
 
         # Receive metrics from gpus
+        torch.cuda.empty_cache()
         iterations = [None for _ in range(args.num_gpus)]
         loss_sum = [None for _ in range(args.num_gpus)]
         distortion = [None for _ in range(args.num_gpus)]
