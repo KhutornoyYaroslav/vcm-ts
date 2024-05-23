@@ -2,7 +2,6 @@ import logging
 import os
 import torch
 from torch.nn.parallel import DistributedDataParallel
-from core.utils.model_zoo import cache_url
 
 
 class CheckPointer:
@@ -141,10 +140,4 @@ class CheckPointer:
             f.write(last_filename)
 
     def _load_file(self, f):
-        # download url files
-        if f.startswith("http"):
-            # if the file is a url path, download it and cache it
-            cached_f = cache_url(f)
-            self.logger.info("url {} cached in {}".format(f, cached_f))
-            f = cached_f
         return torch.load(f, map_location=torch.device("cpu"))
