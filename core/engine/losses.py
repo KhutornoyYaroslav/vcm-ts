@@ -330,7 +330,7 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
         for p in self.model.parameters():
             p.requires_grad = False
 
-    def get_features(self, input, layers=[0, 3, 7]):
+    def get_features(self, input, layers=[0, 1, 3, 5, 7]):
         y = []
         features = []
         for i, m in enumerate(self.model.model):
@@ -343,9 +343,15 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
             y.append(input if m.i in self.model.save else None)  # save output
             if len(features) == len(layers):
                 break
-        return features
+        return {
+            '1': features[0],
+            '2': features[1],
+            '3': features[2],
+            '4': features[3],
+            '5': features[4]
+        }
 
-    def forward(self, target, input):
+    def forward(self, target, input, feature_layers=['1', '2', '3', '4', '5']):
         input = input.clamp(0, 1)
         target = target.clamp(0, 1)
 
@@ -364,14 +370,17 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
             mode="constant",
             value=0,
         )
-        f_input = self.get_features(input_padded)
-        f_target = self.get_features(target_padded)
+        fs_input = self.get_features(input_padded)
+        fs_target = self.get_features(target_padded)
 
         # Calculate loss
         loss = []
-        for index in range(len(f_input)):
-            loss_ = torch.nn.functional.mse_loss(f_input[index], f_target[index], reduction='none')
-            loss.append(torch.mean(loss_, dim=(1, 2, 3)))
+        for key in fs_input.keys():
+            if key in feature_layers:
+                loss_ = torch.nn.functional.mse_loss(fs_input[key], fs_target[key], reduction='none')
+                loss_ = torch.mean(loss_, dim=(1, 2, 3))
+                loss.append(loss_)
+
         loss = torch.stack(loss)
         loss = torch.sum(loss, 0)
 
