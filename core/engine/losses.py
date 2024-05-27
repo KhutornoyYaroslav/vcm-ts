@@ -330,7 +330,7 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
         for p in self.model.parameters():
             p.requires_grad = False
 
-    def get_features(self, input, layers=[0, 1, 3, 5, 7]):
+    def get_features(self, input, layers=[0, 1, 3, 5, 7, 15, 18, 21]):
         y = []
         features = []
         for i, m in enumerate(self.model.model):
@@ -348,10 +348,13 @@ class YOLOV8PerceptualLoss(torch.nn.Module):
             '2': features[1],
             '3': features[2],
             '4': features[3],
-            '5': features[4]
+            '5': features[4],
+            '3_deep': features[5],
+            '4_deep': features[6],
+            '5_deep': features[7]
         }
 
-    def forward(self, target, input, feature_layers=['1', '2', '3', '4', '5']):
+    def forward(self, target, input, feature_layers=['1', '2', '3', '4', '5', '3_deep', '4_deep', '5_deep']):
         input = input.clamp(0, 1)
         target = target.clamp(0, 1)
 
