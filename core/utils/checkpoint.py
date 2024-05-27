@@ -1,5 +1,6 @@
 import logging
 import os
+
 import torch
 from torch.nn.parallel import DistributedDataParallel
 
@@ -100,7 +101,8 @@ class CheckPointer:
                             val['step'] = torch.tensor(val['step'], dtype=torch.float32)
                             occurrences += 1
                 if occurrences > 0:
-                    self.logger.warn("Optimizer state steps were converted (int to tensor, {} occurrences)".format(occurrences))
+                    self.logger.warning(
+                        "Optimizer state steps were converted (int to tensor, {} occurrences)".format(occurrences))
 
                 self.optimizer.load_state_dict(opt_params)
             except ValueError:

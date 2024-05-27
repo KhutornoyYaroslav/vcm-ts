@@ -11,26 +11,14 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-from PIL import Image
 from tqdm import tqdm
 
 from DCVC_HEM.src.models.image_model import IntraNoAR
 from DCVC_HEM.src.models.video_model import DMC
 from DCVC_HEM.src.utils.common import interpolate_log
 from DCVC_HEM.src.utils.png_reader import PNGReader
-from DCVC_HEM.src.utils.stream_helper import get_padding_size, get_state_dict, filesize
-
-
-def np_image_to_tensor(img):
-    image = torch.from_numpy(img).type(torch.FloatTensor)
-    image = image.unsqueeze(0)
-    return image
-
-
-def save_torch_image(img, save_path):
-    img = img.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
-    img = np.clip(np.rint(img * 255), 0, 255).astype(np.uint8)
-    Image.fromarray(img).save(save_path)
+from DCVC_HEM.src.utils.stream_helper import get_padding_size, get_state_dict, filesize, np_image_to_tensor, \
+    save_torch_image
 
 
 def generate_log_json(frame_num, gop, frame_types, bits, frame_pixel_num):
@@ -57,7 +45,7 @@ def generate_log_json(frame_num, gop, frame_types, bits, frame_pixel_num):
     else:
         log_result['avg_p_frame_bpp'] = 0
     log_result['avg_bpp'] = (cur_ave_i_frame_bit + cur_ave_p_frame_bit) / \
-        (frame_num * frame_pixel_num)
+                            (frame_num * frame_pixel_num)
     log_result['frame_bpp'] = list(np.array(bits) / frame_pixel_num)
     log_result['frame_type'] = frame_types
 

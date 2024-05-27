@@ -1,6 +1,6 @@
+import argparse
+
 import torch
-import argparse
-import argparse
 
 
 def parse_weights(weights_path: str):

@@ -1,17 +1,17 @@
+import argparse
+import logging
 import os
-import time
 
 import torch
-import logging
-import argparse
-from core.utils import dist_util
+
 from core.config import cfg as cfg
-from core.engine.train import do_train
 from core.data import make_data_loader
-from core.utils.logger import setup_logger
-from core.modelling.model import build_model
+from core.engine.train import do_train
+from core.model import build_model
+from core.solver.optimizer import make_optimizer
+from core.utils import dist_util
 from core.utils.checkpoint import CheckPointer
-from core.solver import make_optimizer
+from core.utils.logger import setup_logger
 
 
 def train_model(cfg, args):

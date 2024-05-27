@@ -195,7 +195,7 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
         for i in range(n):
             metric_map.update(output_annotations[i], source_annotations[i])
             map_metrics = metric_map.compute()
-            mean_ap = map_metrics['map_50'].item() * 100
+            mean_ap = map_metrics['map'].item() * 100
             stats['mean_ap'].append(mean_ap)
 
     # Return results

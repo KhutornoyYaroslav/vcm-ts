@@ -1,5 +1,5 @@
-import os
 import argparse
+
 from core.config import cfg as cfg
 from core.data.datasets import build_dataset
 
@@ -20,7 +20,8 @@ def main():
     cfg.freeze()
 
     # Check dataset
-    datasets = build_dataset(cfg.DATASET.TYPE, cfg.DATASET.TRAIN_ROOT_DIRS[0], cfg, cfg.DATASET.TRAIN_SUBDIR_LISTS[0], True)
+    datasets = build_dataset(cfg.DATASET.TYPE, cfg.DATASET.TRAIN_ROOT_DIRS[0], cfg, cfg.DATASET.TRAIN_SUBDIR_LISTS[0],
+                             True)
     print('Sequences length = ' + str(len(datasets.sequences)))
     datasets.visualize(25)
 

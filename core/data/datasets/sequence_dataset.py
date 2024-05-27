@@ -1,9 +1,11 @@
 import os
-import cv2 as cv
-import numpy as np
 from glob import glob
 from typing import Tuple
+
+import cv2 as cv
+import numpy as np
 from torch.utils.data import Dataset
+
 from ..transforms.transforms import (
     ConvertFromInts,
     Clip,
@@ -27,12 +29,13 @@ class SequenceDataset(Dataset):
         self.inputs_dirname_template = cfg.DATASET.SUBDIR_INPUTS
         self.seq_length = cfg.DATASET.SEQUENCE_LENGTH
         self.seq_stride = cfg.DATASET.SEQUENCE_STRIDE
-        self.sequences = self.read_sequences(self.root_dir, self.dir_list, self.seq_length * self.seq_stride, print_warn)
+        self.sequences = self.read_sequences(self.root_dir, self.dir_list, self.seq_length * self.seq_stride,
+                                             print_warn)
         self.transforms = self.build_transforms(cfg.INPUT.IMAGE_SIZE, self.divisible_by, is_train, to_tensor)
 
     def __len__(self):
         return len(self.sequences)
-    
+
     def read_sequences(self, root: str, dir_list: str, min_length: int, print_warn: bool = False):
         if dir_list == '':
             seqs = sorted(glob(root + "/*/*"))
@@ -56,7 +59,8 @@ class SequenceDataset(Dataset):
 
         return seqs_filtered
 
-    def build_transforms(self, img_size: Tuple[int, int], div_by: int = 1, is_train: bool = True, to_tensor: bool = True):
+    def build_transforms(self, img_size: Tuple[int, int], div_by: int = 1, is_train: bool = True,
+                         to_tensor: bool = True):
         if is_train:
             transform = [
                 RandomCrop(img_size[0], img_size[1], 1.0),
@@ -94,7 +98,7 @@ class SequenceDataset(Dataset):
             input = cv.imread(input_paths[i])
             inputs.append(input)
 
-        input_seq = np.stack(inputs, axis=0) # (T, H, W, C)
+        input_seq = np.stack(inputs, axis=0)  # (T, H, W, C)
         target_seq = input_seq.copy()
 
         # Apply transforms

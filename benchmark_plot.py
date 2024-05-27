@@ -20,30 +20,13 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 from DCVC_HEM.src.utils.png_reader import PNGReader
-from DCVC_HEM.src.utils.stream_helper import get_padding_size
-
-
-def np_image_to_tensor(img):
-    image = torch.from_numpy(img).type(torch.FloatTensor)
-    image = image.unsqueeze(0)
-    return image
+from DCVC_HEM.src.utils.stream_helper import get_padding_size, np_image_to_tensor
 
 
 def get_psnr(input1, input2):
     mse = torch.mean((input1 - input2) ** 2)
     psnr = 20 * torch.log10(1 / torch.sqrt(mse))
     return psnr.item()
-
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    if v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-
-    raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 def delete_unsupported_annotations(annotations, classes):
@@ -436,7 +419,8 @@ def get_metrics(decod_dir: str,
                 delete_unsupported_annotations(annotations, dataset[video_folder.name]['classes'])
 
                 print(f'\t\tCalculate metrics')
-                mean_ap, ocr_results, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name, use_ms_ssim)
+                mean_ap, ocr_results, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name,
+                                                                     use_ms_ssim)
                 metrics_info = dict(
                     mean_ap=mean_ap,
                     ocr_results=ocr_results,
@@ -538,7 +522,8 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label='2% mAP loss')
                 for codec in codecs:
                     bpps = [info['bpp'] for info in metrics[codec][video]]
-                    maps = [info['mean_ap'][detection_model]['class_map_50'][class_name] for info in metrics[codec][video]]
+                    maps = [info['mean_ap'][detection_model]['class_map_50'][class_name] for info in
+                            metrics[codec][video]]
                     x = np.array(bpps)
                     y = np.array(maps)
                     plt.plot(x, y, 'o-', label=codec)

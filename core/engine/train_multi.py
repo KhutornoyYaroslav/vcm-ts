@@ -12,12 +12,13 @@ from DCVC_HEM.src.models.image_model import IntraNoAR
 from DCVC_HEM.src.utils.common import interpolate_log
 from DCVC_HEM.src.utils.stream_helper import get_state_dict
 from core.data import make_data_loader, make_object_detection_data_loader
-from core.modelling.model import build_model
-from core.solver import make_optimizer
+from core.model import build_model
+from core.solver.optimizer import make_optimizer
 from core.utils import dist_util
 from core.utils.checkpoint import CheckPointer
 from core.utils.tensorboard import add_best_and_worst_sample, add_metrics
 from .validation import eval_dataset
+from ..utils.dist_util import synchronize, get_world_size, get_rank
 
 
 def do_eval(cfg, model, forward_method, loss_dist_key, loss_rate_keys, p_frames, seed, stage, perceptual_loss,
@@ -155,7 +156,7 @@ def get_stage_params(cfg,
         raise SystemError('Invalid loss rate')
 
     # Learning rate
-    world_size = int(os.environ['WORLD_SIZE'])
+    world_size = get_world_size()
     optimizer.param_groups[0]["lr"] = float(stage_params[5]) * math.sqrt(world_size)
 
     # Perceptual loss
@@ -173,12 +174,12 @@ def get_stage_params(cfg,
 def init_model(cfg, logger, arguments):
     # Create model
     model = build_model(cfg).cuda()
-    local_rank = int(os.environ['LOCAL_RANK'])
+    local_rank = get_rank()
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
 
     # Create optimizer
-    num_gpus = int(os.environ['WORLD_SIZE'])
+    num_gpus = get_world_size()
     optimizer = make_optimizer(cfg, model, num_gpus)
 
     # Create checkpointer
@@ -225,9 +226,6 @@ def single_step(input, target, model, stage_params, dpb, optimizer, t_i, outputs
 
         loss_list.append(result['loss'])
 
-        # rank = int(os.environ["RANK"])
-        # print(f'Final ({rank}) {t_i} {p_idx}: {model.module.dmc.mv_encoder[6].weight.grad[0, 0]}')
-
         outputs['rate'].append(result['rate'])  # (N)
         outputs['dist'].append(result['dist'])  # (N)
         outputs['p_dist'].append(result['p_dist'])  # (N)
@@ -258,9 +256,6 @@ def cascade_step(input, target, model, stage_params, dpb, optimizer, t_i, output
     loss_to_opt = result['loss_to_opt']
     loss_to_opt.backward()
     optimizer.step()
-
-    # rank = int(os.environ["RANK"])
-    # print(f'Final ({rank}) {t_i}: {model.module.dmc.mv_encoder[6].weight.grad[0, 0]}')
 
     outputs['rate'].append(result['rate'])  # (N)
     outputs['dist'].append(result['dist'])  # (N)
@@ -304,7 +299,7 @@ def do_train(cfg,
     logger.info("Iterations per epoch: {0}. Total steps: {1}. Start epoch: {2}".format(iters_per_epoch, total_steps,
                                                                                        start_epoch))
     current_stage = get_current_stage(cfg, start_epoch)
-    rank = int(os.environ["RANK"])
+    rank = get_rank()
 
     # Initialize i frame net
     if cfg.MODEL.I_FRAME_PRETRAINED_WEIGHTS != "":
@@ -332,7 +327,7 @@ def do_train(cfg,
         arguments["epoch"] = epoch + 1
 
         if current_stage != get_current_stage(cfg, epoch):
-            dist.barrier()
+            synchronize()
             model, optimizer, checkpointer = reinit_model(model, optimizer, checkpointer,
                                                           cfg, logger, arguments)
             model.train()
@@ -363,7 +358,7 @@ def do_train(cfg,
         stage_params = get_stage_params(cfg, model, optimizer, epoch)
 
         total_iterations = 0
-        dist.barrier()
+        synchronize()
         pbar = enumerate(data_loader)
         pbar = tqdm(pbar, total=len(data_loader))
         for iteration, data_entry in pbar:
@@ -373,19 +368,6 @@ def do_train(cfg,
             input, target = data_entry  # (N, T, C, H, W)
             input = input.cuda()
             target = target.cuda()
-
-            # if iteration == 0:
-            #     rank = int(os.environ["RANK"])
-            #     for i in range(input.shape[0]):
-            #         input_show = input[i][0]
-            #         input_show = (input_show.cpu().numpy() * 255).astype(np.uint8).transpose(1, 2, 0)
-            #
-            #         input_show = cv.cvtColor(input_show, cv.COLOR_RGB2BGR)
-            #
-            #         cv.imshow(f'GPU_{rank}_input_{i}', input_show)
-            #
-            #         if cv.waitKey(0) & 0xFF == ord('q'):
-            #             continue
 
             # Optimize model
             n, t, c, h, w = input.shape
@@ -435,9 +417,11 @@ def do_train(cfg,
             outputs['loss'] = torch.stack(outputs['loss'], -1)  # (N, (T - p_frames) * p_frames or T - p_frames)
             outputs['loss_seq'] = torch.stack(outputs['loss_seq'], -1)  # (N, T - p_frames)
             outputs['input_seqs'] = torch.stack(outputs['input_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
-            outputs['input_seqs'] = outputs['input_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+            outputs['input_seqs'] = outputs['input_seqs'].permute(0, 5, 4, 1, 2,
+                                                                  3)  # (N, T - p_frames, p_frames + 1, C, H, W)
             outputs['decod_seqs'] = torch.stack(outputs['decod_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
-            outputs['decod_seqs'] = outputs['decod_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+            outputs['decod_seqs'] = outputs['decod_seqs'].permute(0, 5, 4, 1, 2,
+                                                                  3)  # (N, T - p_frames, p_frames + 1, C, H, W)
 
             total_iterations += outputs['single_forwards']
 

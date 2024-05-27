@@ -1,22 +1,21 @@
 import argparse
 import datetime
 import os
-import time
 
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
 
 from core.config import cfg as cfg
 from core.data import make_data_loader
 from core.engine.train_multi import do_train
 from core.utils import dist_util
+from core.utils.dist_util import synchronize, get_world_size
 from core.utils.logger import setup_logger
 
 
 def init_distributed():
     # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
-    dist_url = "env://" # default
+    dist_url = "env://"  # default
 
     # only works with torch.distributed.launch // torch.run
     rank = int(os.environ["RANK"])
@@ -37,7 +36,7 @@ def init_distributed():
     print(f"Running DDP on rank {rank}.")
 
     # synchronizes all the threads to reach this point before moving on
-    dist.barrier()
+    synchronize()
 
 
 def train_model(cfg, args):
@@ -46,7 +45,7 @@ def train_model(cfg, args):
 
     arguments = {"epoch": 0}
 
-    dist.barrier()
+    synchronize()
     # Train model
     model = do_train(cfg, data_loader, arguments, args)
 
@@ -74,7 +73,7 @@ def main():
                         help="Modify config options using the command-line")
 
     args = parser.parse_args()
-    NUM_GPUS = int(os.environ['WORLD_SIZE'])
+    NUM_GPUS = get_world_size()
     args.distributed = True
     args.num_gpus = NUM_GPUS
 

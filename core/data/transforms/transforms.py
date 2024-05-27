@@ -1,6 +1,7 @@
-import torch
 import cv2 as cv
 import numpy as np
+import torch
+
 from .functional import make_array_divisible_by
 
 
@@ -8,14 +9,14 @@ class TransformCompose(object):
     def __init__(self, transforms):
         self.transforms = transforms
 
-    def __call__(self, inputs, targets, masks = None, resids = None):
+    def __call__(self, inputs, targets, masks=None, resids=None):
         for t in self.transforms:
             inputs, targets, masks, resids = t(inputs, targets, masks, resids)
         return inputs, targets, 0 if masks is None else masks, 0 if resids is None else resids
 
 
 class ConvertFromInts:
-    def __call__(self, inputs, targets, masks = None, resids = None):
+    def __call__(self, inputs, targets, masks=None, resids=None):
         inputs = inputs.astype(np.float32)
         targets = targets.astype(np.float32)
         if masks is not None:
@@ -31,7 +32,7 @@ class Clip(object):
         self.max = max
         assert self.max >= self.min, "min val must be >= max val"
 
-    def __call__(self, inputs, targets, masks = None, resids = None):
+    def __call__(self, inputs, targets, masks=None, resids=None):
         inputs = np.clip(inputs, self.min, self.max)
         targets = np.clip(targets, self.min, self.max)
         return inputs, targets, masks, resids
@@ -42,7 +43,7 @@ class Normalize(object):
         self.norm_mask = norm_mask
         self.norm_resids = norm_resids
 
-    def __call__(self, inputs, targets, masks = None, resids = None):
+    def __call__(self, inputs, targets, masks=None, resids=None):
         inputs = inputs.astype(np.float32) / 255.0
         targets = targets.astype(np.float32) / 255.0
         if masks is not None and self.norm_mask:
@@ -53,22 +54,22 @@ class Normalize(object):
 
 
 class ToTensor:
-    def __call__(self, inputs, targets, masks = None, resids = None):
+    def __call__(self, inputs, targets, masks=None, resids=None):
         # (T, H, W, C) -> (T, C, H, W)
-        inputs = torch.from_numpy(inputs.astype(np.float32)).permute(0, 3, 1, 2) 
+        inputs = torch.from_numpy(inputs.astype(np.float32)).permute(0, 3, 1, 2)
         targets = torch.from_numpy(targets.astype(np.float32)).permute(0, 3, 1, 2)
         if masks is not None:
             masks = torch.from_numpy(masks.astype(np.float32)).permute(0, 3, 1, 2)
         if resids is not None:
             resids = torch.from_numpy(resids.astype(np.float32)).permute(0, 3, 1, 2)
         return inputs, targets, masks, resids
-    
+
 
 class MakeDivisibleBy:
     def __init__(self, factor: int):
         self.factor = factor
 
-    def __call__(self, inputs, targets, masks = None, resids = None):
+    def __call__(self, inputs, targets, masks=None, resids=None):
         inputs = make_array_divisible_by(inputs, self.factor)
         targets = make_array_divisible_by(targets, self.factor)
 
@@ -86,7 +87,7 @@ class ConvertColor(object):
         self.transform = transform
         self.current = current
 
-    def __call__(self, inputs, targets, masks = None, resids = None):
+    def __call__(self, inputs, targets, masks=None, resids=None):
         # (T, H, W, C)
         if self.current == 'BGR' and self.transform == 'RGB':
             for i, _ in enumerate(inputs):
@@ -100,7 +101,7 @@ class ConvertColor(object):
                 targets[i] = cv.cvtColor(targets[i], cv.COLOR_RGB2BGR)
         else:
             raise NotImplementedError
-        
+
         return inputs, targets, masks, resids
 
 
@@ -111,8 +112,8 @@ class RandomCrop(object):
         self.crop_h = h
         self.p = np.clip(probabilty, 0.0, 1.0)
 
-    def __call__(self, inputs, targets, masks = None, resids = None):
-        if np.random.choice([0, 1], size=1, p=[1-self.p, self.p]):
+    def __call__(self, inputs, targets, masks=None, resids=None):
+        if np.random.choice([0, 1], size=1, p=[1 - self.p, self.p]):
             _, h, w, _ = inputs.shape
             crop_x = int(np.random.random() * (w - self.crop_w))
             crop_y = int(np.random.random() * (h - self.crop_h))
@@ -133,8 +134,8 @@ class CentralCrop(object):
         self.crop_h = h
         self.p = np.clip(probabilty, 0.0, 1.0)
 
-    def __call__(self, inputs, targets, masks = None, resids = None):
-        if np.random.choice([0, 1], size=1, p=[1-self.p, self.p]):
+    def __call__(self, inputs, targets, masks=None, resids=None):
+        if np.random.choice([0, 1], size=1, p=[1 - self.p, self.p]):
             _, h, w, _ = inputs.shape
             crop_x = int((w - self.crop_w) / 2)
             crop_y = int((h - self.crop_h) / 2)

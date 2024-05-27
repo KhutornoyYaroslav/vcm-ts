@@ -13,7 +13,7 @@ from torch.utils.data import (
 )
 
 from .datasets import build_dataset
-from .datasets.ObjectDetectionDataset import ObjectDetectionDataset
+from .datasets.object_detection_dataset import ObjectDetectionDataset
 
 
 def create_distributed_loader(dataset: Dataset,

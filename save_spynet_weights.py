@@ -1,7 +1,8 @@
+import argparse
 import copy
 
 import torch
-import argparse
+
 from DCVC_HEM.src.models.video_model import DMC
 
 
