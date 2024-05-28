@@ -380,7 +380,7 @@ def compute_residuals(root: str,
         encoded_frame = cv.imread(encoded_frame_path).astype(np.float32)
         h, w, c = source_frame.shape
         residual = source_frame - encoded_frame
-        residual = (residual + 255) / 2
+        residual = np.clip(residual + 128, 0.0, 255.0)
 
         # Read liplates bounding boxes
         lp_bboxes = []
@@ -523,7 +523,7 @@ def fuse_layers(root: str,
         # Read frames
         dcvc_hem_frame = cv.imread(dcvc_hem_file).astype(np.float32)
         enhancement_frame_residual = cv.imread(enhancement_file).astype(np.float32)
-        enhancement_frame = enhancement_frame_residual * 2 - 255
+        enhancement_frame = enhancement_frame_residual - 128
 
         # Read liplates bounding boxes
         lp_bboxes = []
