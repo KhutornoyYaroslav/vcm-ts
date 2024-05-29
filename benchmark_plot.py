@@ -465,7 +465,8 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.title(f'Object detection performance on {detection_model} for {video}')
             plt.xlabel('bpp')
             plt.ylabel('mAP@0.5 (%)')
-            plt.savefig(os.path.join(out_path, f"detection_0_5_model_{detection_model}_{video}.png"))
+            plt.savefig(os.path.join(out_path, f"detection_0_5_model_{detection_model}_{video}.png"),
+                        bbox_inches='tight')
 
             plt.figure(figsize=(16, 9))
             orig_map = dataset[video]['mean_ap'][detection_model]['map']
@@ -486,7 +487,7 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.title(f'Object detection performance on {detection_model} for {video}')
             plt.xlabel('bpp')
             plt.ylabel('mAP (%)')
-            plt.savefig(os.path.join(out_path, f"detection_model_{detection_model}_{video}.png"))
+            plt.savefig(os.path.join(out_path, f"detection_model_{detection_model}_{video}.png"), bbox_inches='tight')
 
             class_names = sorted(list(metrics[codecs[0]][video][0]['mean_ap'][detection_model]['class_map'].keys()))
             for class_name in class_names:
@@ -509,7 +510,8 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 plt.title(f'Object detection performance for class {class_name} on {detection_model} for {video}')
                 plt.xlabel('bpp')
                 plt.ylabel('mAP (%)')
-                plt.savefig(os.path.join(out_path, f"detection_model_{class_name}_{detection_model}_{video}.png"))
+                plt.savefig(os.path.join(out_path, f"detection_model_{class_name}_{detection_model}_{video}.png"),
+                            bbox_inches='tight')
 
             for class_name in class_names:
                 plt.figure(figsize=(16, 9))
@@ -532,7 +534,8 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 plt.title(f'Object detection performance for class {class_name} on {detection_model} for {video}')
                 plt.xlabel('bpp')
                 plt.ylabel('mAP@0.5 (%)')
-                plt.savefig(os.path.join(out_path, f"detection_0_5_model_{class_name}_{detection_model}_{video}.png"))
+                plt.savefig(os.path.join(out_path, f"detection_0_5_model_{class_name}_{detection_model}_{video}.png"),
+                            bbox_inches='tight')
 
         matchers = sorted(list(metrics[codecs[0]][video][0]['ocr_results'].keys()))
         for matcher in matchers:
@@ -548,7 +551,7 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.title(f'Text matching on {matcher} for {video}')
             plt.xlabel('bpp')
             plt.ylabel('Metric value, %')
-            plt.savefig(os.path.join(out_path, f"text_match_{matcher}_{video}.png"))
+            plt.savefig(os.path.join(out_path, f"text_match_{matcher}_{video}.png"), bbox_inches='tight')
 
         plt.figure(figsize=(16, 9))
         for codec in codecs:
@@ -562,7 +565,7 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
         plt.title(f'Rate and distortion curves (PSNR) for {video}')
         plt.xlabel('bpp')
         plt.ylabel('PSNR (db)')
-        plt.savefig(os.path.join(out_path, f"psnr_{video}.png"))
+        plt.savefig(os.path.join(out_path, f"psnr_{video}.png"), bbox_inches='tight')
 
         if use_ms_ssim:
             plt.figure(figsize=(16, 9))
@@ -577,7 +580,7 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.title(f'Rate and distortion curves (MS_SSIM) for {video}')
             plt.xlabel('bpp')
             plt.ylabel('MS-SSIM')
-            plt.savefig(os.path.join(out_path, f"ms-ssim_{video}.png"))
+            plt.savefig(os.path.join(out_path, f"ms-ssim_{video}.png"), bbox_inches='tight')
 
         for codec in codecs:
             plot_flag = True
@@ -600,7 +603,7 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 plt.title(f'Bpp per frame for codec {codec} and video {video}')
                 plt.xlabel('frame')
                 plt.ylabel('bpp')
-                plt.savefig(os.path.join(out_path, f"bpp_{codec}_{video}.png"))
+                plt.savefig(os.path.join(out_path, f"bpp_{codec}_{video}.png"), bbox_inches='tight')
 
 
 def main():
