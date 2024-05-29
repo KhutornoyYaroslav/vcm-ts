@@ -23,6 +23,11 @@ from DCVC_HEM.src.utils.png_reader import PNGReader
 from DCVC_HEM.src.utils.stream_helper import get_padding_size, np_image_to_tensor
 
 
+line_styles = ['o-', 'v--', 's-.', '*:']
+line_colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+               'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+
+
 def get_psnr(input1, input2):
     mse = torch.mean((input1 - input2) ** 2)
     psnr = 20 * torch.log10(1 / torch.sqrt(mse))
@@ -438,7 +443,7 @@ def get_metrics(decod_dir: str,
     return metrics
 
 
-def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
+def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop: bool):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
     os.makedirs(out_path, exist_ok=True)
@@ -446,6 +451,9 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
     for video in videos:
         detection_models = sorted(list(metrics[codecs[0]][video][0]['mean_ap'].keys()))
         for detection_model in detection_models:
+            gop_count = 0
+            color_count = -1
+            previous_codec = ''
             plt.figure(figsize=(16, 9))
             orig_map = dataset[video]['mean_ap'][detection_model]['map_50']
             map_loss_1 = orig_map - 1
@@ -459,7 +467,22 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 maps = [info['mean_ap'][detection_model]['map_50'] for info in metrics[codec][video]]
                 x = np.array(bpps)
                 y = np.array(maps)
-                plt.plot(x, y, 'o-', label=codec)
+                if compare_gop:
+                    codec_unique_name = codec.split('gop')[0].strip()
+                    if codec_unique_name != previous_codec:
+                        gop_count = 0
+                        color_count += 1
+                        previous_codec = codec_unique_name
+                    style = line_styles[gop_count]
+                    color = line_colors[color_count]
+                    codec_gop = metrics[codec][video][0]['gop']
+                    codec_name = codec_unique_name + f' gop {codec_gop}'
+                    plt.plot(x, y, style, color=color, label=codec_name)
+                    gop_count += 1
+                else:
+                    plt.plot(x, y, 'o-', label=codec)
+            color_count = -1
+            previous_codec = ''
             plt.legend()
             plt.grid()
             plt.title(f'Object detection performance on {detection_model} for {video}')
@@ -481,7 +504,22 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 maps = [info['mean_ap'][detection_model]['map'] for info in metrics[codec][video]]
                 x = np.array(bpps)
                 y = np.array(maps)
-                plt.plot(x, y, 'o-', label=codec)
+                if compare_gop:
+                    codec_unique_name = codec.split('gop')[0].strip()
+                    if codec_unique_name != previous_codec:
+                        gop_count = 0
+                        color_count += 1
+                        previous_codec = codec_unique_name
+                    style = line_styles[gop_count]
+                    color = line_colors[color_count]
+                    codec_gop = metrics[codec][video][0]['gop']
+                    codec_name = codec_unique_name + f' gop {codec_gop}'
+                    plt.plot(x, y, style, color=color, label=codec_name)
+                    gop_count += 1
+                else:
+                    plt.plot(x, y, 'o-', label=codec)
+            color_count = -1
+            previous_codec = ''
             plt.legend()
             plt.grid()
             plt.title(f'Object detection performance on {detection_model} for {video}')
@@ -504,7 +542,22 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                     maps = [info['mean_ap'][detection_model]['class_map'][class_name] for info in metrics[codec][video]]
                     x = np.array(bpps)
                     y = np.array(maps)
-                    plt.plot(x, y, 'o-', label=codec)
+                    if compare_gop:
+                        codec_unique_name = codec.split('gop')[0].strip()
+                        if codec_unique_name != previous_codec:
+                            gop_count = 0
+                            color_count += 1
+                            previous_codec = codec_unique_name
+                        style = line_styles[gop_count]
+                        color = line_colors[color_count]
+                        codec_gop = metrics[codec][video][0]['gop']
+                        codec_name = codec_unique_name + f' gop {codec_gop}'
+                        plt.plot(x, y, style, color=color, label=codec_name)
+                        gop_count += 1
+                    else:
+                        plt.plot(x, y, 'o-', label=codec)
+                color_count = -1
+                previous_codec = ''
                 plt.legend()
                 plt.grid()
                 plt.title(f'Object detection performance for class {class_name} on {detection_model} for {video}')
@@ -528,7 +581,22 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                             metrics[codec][video]]
                     x = np.array(bpps)
                     y = np.array(maps)
-                    plt.plot(x, y, 'o-', label=codec)
+                    if compare_gop:
+                        codec_unique_name = codec.split('gop')[0].strip()
+                        if codec_unique_name != previous_codec:
+                            gop_count = 0
+                            color_count += 1
+                            previous_codec = codec_unique_name
+                        style = line_styles[gop_count]
+                        color = line_colors[color_count]
+                        codec_gop = metrics[codec][video][0]['gop']
+                        codec_name = codec_unique_name + f' gop {codec_gop}'
+                        plt.plot(x, y, style, color=color, label=codec_name)
+                        gop_count += 1
+                    else:
+                        plt.plot(x, y, 'o-', label=codec)
+                color_count = -1
+                previous_codec = ''
                 plt.legend()
                 plt.grid()
                 plt.title(f'Object detection performance for class {class_name} on {detection_model} for {video}')
@@ -539,13 +607,29 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
 
         matchers = sorted(list(metrics[codecs[0]][video][0]['ocr_results'].keys()))
         for matcher in matchers:
+            gop_count = 0
+            color_count = -1
+            previous_codec = ''
             plt.figure(figsize=(16, 9))
             for codec in codecs:
                 bpps = [info['bpp'] for info in metrics[codec][video]]
                 match_values = [info['ocr_results'][matcher] for info in metrics[codec][video]]
                 x = np.array(bpps)
                 y = np.array(match_values)
-                plt.plot(x, y, 'o-', label=codec)
+                if compare_gop:
+                    codec_unique_name = codec.split('gop')[0].strip()
+                    if codec_unique_name != previous_codec:
+                        gop_count = 0
+                        color_count += 1
+                        previous_codec = codec_unique_name
+                    style = line_styles[gop_count]
+                    color = line_colors[color_count]
+                    codec_gop = metrics[codec][video][0]['gop']
+                    codec_name = codec_unique_name + f' gop {codec_gop}'
+                    plt.plot(x, y, style, color=color, label=codec_name)
+                    gop_count += 1
+                else:
+                    plt.plot(x, y, 'o-', label=codec)
             plt.legend()
             plt.grid()
             plt.title(f'Text matching on {matcher} for {video}')
@@ -553,13 +637,31 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             plt.ylabel('Metric value, %')
             plt.savefig(os.path.join(out_path, f"text_match_{matcher}_{video}.png"), bbox_inches='tight')
 
+        gop_count = 0
+        color_count = -1
+        previous_codec = ''
         plt.figure(figsize=(16, 9))
         for codec in codecs:
             bpps = [info['bpp'] for info in metrics[codec][video]]
             psnrs = [info['psnr'] for info in metrics[codec][video]]
             x = np.array(bpps)
             y = np.array(psnrs)
-            plt.plot(x, y, 'o-', label=codec)
+            if compare_gop:
+                codec_unique_name = codec.split('gop')[0].strip()
+                if codec_unique_name != previous_codec:
+                    gop_count = 0
+                    color_count += 1
+                    previous_codec = codec_unique_name
+                style = line_styles[gop_count]
+                color = line_colors[color_count]
+                codec_gop = metrics[codec][video][0]['gop']
+                codec_name = codec_unique_name + f' gop {codec_gop}'
+                plt.plot(x, y, style, color=color, label=codec_name)
+                gop_count += 1
+            else:
+                plt.plot(x, y, 'o-', label=codec)
+        color_count = -1
+        previous_codec = ''
         plt.legend()
         plt.grid()
         plt.title(f'Rate and distortion curves (PSNR) for {video}')
@@ -574,7 +676,20 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 ssims = [info['ssim'] for info in metrics[codec][video]]
                 x = np.array(bpps)
                 y = np.array(ssims)
-                plt.plot(x, y, 'o-', label=codec)
+                if compare_gop:
+                    codec_unique_name = codec.split('gop')[0].strip()
+                    if codec_unique_name != previous_codec:
+                        gop_count = 0
+                        color_count += 1
+                        previous_codec = codec_unique_name
+                    style = line_styles[gop_count]
+                    color = line_colors[color_count]
+                    codec_gop = metrics[codec][video][0]['gop']
+                    codec_name = codec_unique_name + f' gop {codec_gop}'
+                    plt.plot(x, y, style, color=color, label=codec_name)
+                    gop_count += 1
+                else:
+                    plt.plot(x, y, 'o-', label=codec)
             plt.legend()
             plt.grid()
             plt.title(f'Rate and distortion curves (MS_SSIM) for {video}')
@@ -644,7 +759,7 @@ def main():
                           config["ms_ssim"],
                           config["labels_start_index"])
 
-    plot_graphs(metrics, dataset, config["out_path"], config["ms_ssim"])
+    plot_graphs(metrics, dataset, config["out_path"], config["ms_ssim"], config["compare_gop"])
 
 
 if __name__ == "__main__":

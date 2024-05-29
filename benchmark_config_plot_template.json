@@ -4,6 +4,7 @@
     "device": "cuda",
     "out_path": "outputs/benchmark/decod",
     "ms_ssim": false,
+    "compare_gop": false,
     "labels_start_index": 1,
     "sequences": [
         {
