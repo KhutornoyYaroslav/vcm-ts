@@ -30,19 +30,21 @@ def compute_bd(metrics, anchor, out_dir):
             rate_test = [info['bpp'] for info in metrics[codec][video]]
             psnr_test = [info['psnr'] for info in metrics[codec][video]]
 
-            bd_rate = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
+            bd_rate_psnr = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
             bd_psnr = bd.bd_psnr(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
 
             with open(out_file, "a") as f:
                 f.write(f"Codec {codec} for {video}\n")
-                f.write(f"\tBD-Rate: {bd_rate:.4f} %\n")
+                f.write(f"\tBD-Rate (PSNR): {bd_rate_psnr:.4f} %\n")
                 f.write(f"\tBD-PSNR: {bd_psnr:.4f} dB\n")
-                f.write(f"\tBD-mAP for models\n")
             for detection_model in detection_models:
                 map_test = [info['mean_ap'][detection_model]['map'] for info in metrics[codec][video]]
+                bd_rate_map = bd.bd_rate(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
                 bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
                 with open(out_file, "a") as f:
-                    f.write(f"\t\t{detection_model}: {bd_map:.4f} %\n")
+                    f.write(f"\tBD-mAP for model {detection_model}\n")
+                    f.write(f"\t\tBD-Rate (mAP): {bd_rate_map:.4f} %\n")
+                    f.write(f"\t\tBD-mAP: {bd_map:.4f} %\n")
 
 
 def compute_bd_gop(metrics, anchor, out_dir):
@@ -82,19 +84,22 @@ def compute_bd_gop(metrics, anchor, out_dir):
                 rate_test = [info['bpp'] for info in gop_metrics[codec][gop][video]]
                 psnr_test = [info['psnr'] for info in gop_metrics[codec][gop][video]]
 
-                bd_rate = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
+                bd_rate_psnr = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
                 bd_psnr = bd.bd_psnr(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
 
                 with open(out_file, "a") as f:
                     f.write(f"\tGOP {gop} for {video}\n")
-                    f.write(f"\t\tBD-Rate: {bd_rate:.4f} %\n")
+                    f.write(f"\t\tBD-Rate (PSNR): {bd_rate_psnr:.4f} %\n")
                     f.write(f"\t\tBD-PSNR: {bd_psnr:.4f} dB\n")
-                    f.write(f"\t\tBD-mAP for models\n")
                 for detection_model in detection_models:
                     map_test = [info['mean_ap'][detection_model]['map'] for info in gop_metrics[codec][gop][video]]
+                    bd_rate_map = bd.bd_rate(rate_anchor, map_anchors[detection_model], rate_test, map_test,
+                                             method='akima')
                     bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
                     with open(out_file, "a") as f:
-                        f.write(f"\t\t\t{detection_model}: {bd_map:.4f} %\n")
+                        f.write(f"\t\tBD-mAP for model {detection_model}\n")
+                        f.write(f"\t\t\tBD-Rate (mAP): {bd_rate_map:.4f} %\n")
+                        f.write(f"\t\t\tBD-mAP: {bd_map:.4f} %\n")
 
 
 def main():
