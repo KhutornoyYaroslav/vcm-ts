@@ -9,9 +9,12 @@ def str2bool(s):
     return s.lower() in ('true', '1')
 
 
-def compute_bd(metrics, anchor):
+def compute_bd(metrics, anchor, out_dir):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
+    out_file = os.path.join(out_dir, "bd_metrics.txt")
+    if os.path.exists(out_file):
+        os.remove(out_file)
     for video in videos:
         rate_anchor = [info['bpp'] for info in metrics[anchor][video]]
         psnr_anchor = [info['psnr'] for info in metrics[anchor][video]]
@@ -30,21 +33,25 @@ def compute_bd(metrics, anchor):
             bd_rate = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
             bd_psnr = bd.bd_psnr(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
 
-            print(f"Codec {codec} for {video}")
-            print(f"\tBD-Rate: {bd_rate:.4f} %")
-            print(f"\tBD-PSNR: {bd_psnr:.4f} dB")
-
-            print(f"\tBD-mAP for models")
+            with open(out_file, "a") as f:
+                f.write(f"Codec {codec} for {video}\n")
+                f.write(f"\tBD-Rate: {bd_rate:.4f} %\n")
+                f.write(f"\tBD-PSNR: {bd_psnr:.4f} dB\n")
+                f.write(f"\tBD-mAP for models\n")
             for detection_model in detection_models:
                 map_test = [info['mean_ap'][detection_model]['map'] for info in metrics[codec][video]]
                 bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
-                print(f"\t\t{detection_model}: {bd_map:.4f} %")
+                with open(out_file, "a") as f:
+                    f.write(f"\t\t{detection_model}: {bd_map:.4f} %\n")
 
 
-def compute_bd_gop(metrics, anchor):
+def compute_bd_gop(metrics, anchor, out_dir):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
     gop_metrics = {}
+    out_file = os.path.join(out_dir, "bd_metrics.txt")
+    if os.path.exists(out_file):
+        os.remove(out_file)
     for codec in codecs:
         codec_unique_name = codec.split('gop')[0].strip()
         if codec_unique_name not in gop_metrics.keys():
@@ -67,7 +74,8 @@ def compute_bd_gop(metrics, anchor):
                 map_anchors[detection_model] = [info['mean_ap'][detection_model]['map'] for info in
                                                 gop_metrics[codec][anchor][video]]
 
-            print(f"Codec {codec} with anchor {anchor}:")
+            with open(out_file, "a") as f:
+                f.write(f"Codec {codec} with anchor {anchor}:\n")
             for gop in gops:
                 if gop == anchor:
                     continue
@@ -77,22 +85,25 @@ def compute_bd_gop(metrics, anchor):
                 bd_rate = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
                 bd_psnr = bd.bd_psnr(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
 
-                print(f"\tGOP {gop} for {video}")
-                print(f"\t\tBD-Rate: {bd_rate:.4f} %")
-                print(f"\t\tBD-PSNR: {bd_psnr:.4f} dB")
-
-                print(f"\t\tBD-mAP for models")
+                with open(out_file, "a") as f:
+                    f.write(f"\tGOP {gop} for {video}\n")
+                    f.write(f"\t\tBD-Rate: {bd_rate:.4f} %\n")
+                    f.write(f"\t\tBD-PSNR: {bd_psnr:.4f} dB\n")
+                    f.write(f"\t\tBD-mAP for models\n")
                 for detection_model in detection_models:
                     map_test = [info['mean_ap'][detection_model]['map'] for info in gop_metrics[codec][gop][video]]
                     bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
-                    print(f"\t\t\t{detection_model}: {bd_map:.4f} %")
+                    with open(out_file, "a") as f:
+                        f.write(f"\t\t\t{detection_model}: {bd_map:.4f} %\n")
 
 
 def main():
     # Create argument parser
     parser = argparse.ArgumentParser(description='Bjøntegaard-Delta metrics calculation')
     parser.add_argument("--decod-dir", dest="decod_dir", required=False, type=str,
-                        default="data/huawei/outputs/cut_decod_hevc", help="Path to decoded dir")
+                        default="data/huawei/outputs/decod", help="Path to decoded dir")
+    parser.add_argument("--out-path", dest="out_path", required=False, type=str,
+                        default="outputs/benchmark/decod", help="Path to output dir")
     parser.add_argument("--anchor", dest="anchor", required=False, type=str,
                         default="HEVC veryslow", help="Anchor name")
     parser.add_argument("--compare-gop", dest="compare_gop", required=False, type=str2bool,
@@ -119,10 +130,11 @@ def main():
                 else:
                     raise RuntimeError(f"No file with metrics for {quality}")
 
+    os.makedirs(args.out_path, exist_ok=True)
     if args.compare_gop:
-        compute_bd_gop(metrics, args.anchor)
+        compute_bd_gop(metrics, args.anchor, args.out_path)
     else:
-        compute_bd(metrics, args.anchor)
+        compute_bd(metrics, args.anchor, args.out_path)
 
 if __name__ == '__main__':
     main()
