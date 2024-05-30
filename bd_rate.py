@@ -9,7 +9,7 @@ def str2bool(s):
     return s.lower() in ('true', '1')
 
 
-def fix_curve(points):
+def fix_curve(points, eps=1e-8):
     is_asc = points[0] < points[-1]
     result = []
     for point in points:
@@ -21,12 +21,12 @@ def fix_curve(points):
             if point > result[-1]:
                 result.append(point)
             else:
-                result.append(result[-1])
+                result.append(result[-1] + eps)
         else:
             if point < result[-1]:
                 result.append(point)
             else:
-                result.append(result[-1])
+                result.append(result[-1] + eps)
 
     return result
 
