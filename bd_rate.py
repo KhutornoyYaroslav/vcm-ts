@@ -9,6 +9,28 @@ def str2bool(s):
     return s.lower() in ('true', '1')
 
 
+def fix_curve(points):
+    is_asc = points[0] < points[-1]
+    result = []
+    for point in points:
+        if len(result) == 0:
+            result.append(point)
+            continue
+
+        if is_asc:
+            if point > result[-1]:
+                result.append(point)
+            else:
+                result.append(result[-1])
+        else:
+            if point < result[-1]:
+                result.append(point)
+            else:
+                result.append(result[-1])
+
+    return result
+
+
 def compute_bd(metrics, anchor, out_dir):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
@@ -39,6 +61,7 @@ def compute_bd(metrics, anchor, out_dir):
                 f.write(f"\tBD-PSNR: {bd_psnr:.4f} dB\n")
             for detection_model in detection_models:
                 map_test = [info['mean_ap'][detection_model]['map'] for info in metrics[codec][video]]
+                map_test = fix_curve(map_test)
                 bd_rate_map = bd.bd_rate(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
                 bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
                 with open(out_file, "a") as f:
@@ -93,6 +116,7 @@ def compute_bd_gop(metrics, anchor, out_dir):
                     f.write(f"\t\tBD-PSNR: {bd_psnr:.4f} dB\n")
                 for detection_model in detection_models:
                     map_test = [info['mean_ap'][detection_model]['map'] for info in gop_metrics[codec][gop][video]]
+                    map_test = fix_curve(map_test)
                     bd_rate_map = bd.bd_rate(rate_anchor, map_anchors[detection_model], rate_test, map_test,
                                              method='akima')
                     bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
