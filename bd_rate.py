@@ -45,6 +45,7 @@ def compute_bd(metrics, anchor, out_dir):
         for detection_model in detection_models:
             map_anchors[detection_model] = [info['mean_ap'][detection_model]['map'] for info in
                                             metrics[anchor][video]]
+            map_anchors[detection_model] = fix_curve(map_anchors[detection_model])
 
         for codec in codecs:
             if codec == anchor:
@@ -98,6 +99,7 @@ def compute_bd_gop(metrics, anchor, out_dir):
             for detection_model in detection_models:
                 map_anchors[detection_model] = [info['mean_ap'][detection_model]['map'] for info in
                                                 gop_metrics[codec][anchor][video]]
+                map_anchors[detection_model] = fix_curve(map_anchors[detection_model])
 
             with open(out_file, "a") as f:
                 f.write(f"Codec {codec} with anchor {anchor}:\n")
