@@ -26,7 +26,7 @@ def fix_curve(points, eps=1e-8):
             if point < result[-1]:
                 result.append(point)
             else:
-                result.append(result[-1] + eps)
+                result.append(result[-1] - eps)
 
     return result
 
