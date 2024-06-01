@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import pickle
 import shutil
@@ -615,7 +616,8 @@ def get_dir_size(start_path: str = '.'):
 
 
 def calc_bitrate_metrics(root: str,
-                         video_path: str):
+                         video_path: str,
+                         gop: int):
     logger = logging.getLogger(_LOGGER_NAME)
 
     logger.info('Calculating bitrate metrics...')
@@ -650,6 +652,14 @@ def calc_bitrate_metrics(root: str,
         f.write(f'Recompression ratio [total]: {src_bpp / encoded_bpp}\n')
         f.write(f'Recompression ratio [enhancement layer]: {src_bpp / enhancement_layer_bpp}\n')
         f.write(f'Recompression ratio [base layer]: {src_bpp / base_layer_bpp}\n')
+
+    log_result = {
+        'gop': gop,
+        'avg_bpp': encoded_bpp
+    }
+    json_path = os.path.join(root, _PATHS_INFO, 'quality.json')
+    with open(json_path, 'w') as fp:
+        json.dump(log_result, fp)
 
 
 def calc_visual_metrics(root: str,
@@ -824,7 +834,8 @@ def main():
                       frames_path=os.path.join(args.result_root, _PATHS_ARTIFACTS_RESIDUALS_ENCODED))
 
         calc_bitrate_metrics(root=args.result_root,
-                             video_path=args.video_path)
+                             video_path=args.video_path,
+                             gop=codec_settings.BASE_LAYER.DCVC_HEM.GOP)
 
     # Decode
     if args.do_decode:
