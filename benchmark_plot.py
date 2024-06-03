@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torchvision
 from jiwer import cer
+from matplotlib.ticker import AutoMinorLocator
 from paddleocr import PaddleOCR
 from pytorch_msssim import MS_SSIM
 from torchmetrics.detection import MeanAveragePrecision
@@ -484,7 +485,9 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop:
             color_count = -1
             previous_codec = ''
             plt.legend()
+            plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
             plt.grid()
+            plt.grid(True, 'minor', linestyle='--', alpha=0.5)
             plt.title(f'Object detection performance on {detection_model} for {video}')
             plt.xlabel('bpp')
             plt.ylabel('mAP@0.5 (%)')
@@ -521,7 +524,9 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop:
             color_count = -1
             previous_codec = ''
             plt.legend()
+            plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
             plt.grid()
+            plt.grid(True, 'minor', linestyle='--', alpha=0.5)
             plt.title(f'Object detection performance on {detection_model} for {video}')
             plt.xlabel('bpp')
             plt.ylabel('mAP (%)')
@@ -559,7 +564,9 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop:
                 color_count = -1
                 previous_codec = ''
                 plt.legend()
+                plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
                 plt.grid()
+                plt.grid(True, 'minor', linestyle='--', alpha=0.5)
                 plt.title(f'Object detection performance for class {class_name} on {detection_model} for {video}')
                 plt.xlabel('bpp')
                 plt.ylabel('mAP (%)')
@@ -598,7 +605,9 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop:
                 color_count = -1
                 previous_codec = ''
                 plt.legend()
+                plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
                 plt.grid()
+                plt.grid(True, 'minor', linestyle='--', alpha=0.5)
                 plt.title(f'Object detection performance for class {class_name} on {detection_model} for {video}')
                 plt.xlabel('bpp')
                 plt.ylabel('mAP@0.5 (%)')
@@ -631,7 +640,9 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop:
                 else:
                     plt.plot(x, y, 'o-', label=codec)
             plt.legend()
+            plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
             plt.grid()
+            plt.grid(True, 'minor', linestyle='--', alpha=0.5)
             plt.title(f'Text matching on {matcher} for {video}')
             plt.xlabel('bpp')
             plt.ylabel('Metric value, %')
@@ -663,7 +674,9 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop:
         color_count = -1
         previous_codec = ''
         plt.legend()
+        plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
         plt.grid()
+        plt.grid(True, 'minor', linestyle='--', alpha=0.5)
         plt.title(f'Rate and distortion curves (PSNR) for {video}')
         plt.xlabel('bpp')
         plt.ylabel('PSNR (db)')
@@ -691,7 +704,9 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop:
                 else:
                     plt.plot(x, y, 'o-', label=codec)
             plt.legend()
+            plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
             plt.grid()
+            plt.grid(True, 'minor', linestyle='--', alpha=0.5)
             plt.title(f'Rate and distortion curves (MS_SSIM) for {video}')
             plt.xlabel('bpp')
             plt.ylabel('MS-SSIM')
@@ -714,7 +729,9 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop:
             if plot_flag:
                 plt.yscale('log')
                 plt.legend()
+                plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
                 plt.grid()
+                plt.grid(True, 'minor', linestyle='--', alpha=0.5)
                 plt.title(f'Bpp per frame for codec {codec} and video {video}')
                 plt.xlabel('frame')
                 plt.ylabel('bpp')
