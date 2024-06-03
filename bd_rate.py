@@ -31,7 +31,7 @@ def fix_curve(points, eps=1e-8):
     return result
 
 
-def compute_bd(metrics, anchor, out_dir):
+def compute_bd(metrics, anchor, method, out_dir):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
     out_file = os.path.join(out_dir, "bd_metrics.txt")
@@ -53,8 +53,8 @@ def compute_bd(metrics, anchor, out_dir):
             rate_test = [info['bpp'] for info in metrics[codec][video]]
             psnr_test = [info['psnr'] for info in metrics[codec][video]]
 
-            bd_rate_psnr = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
-            bd_psnr = bd.bd_psnr(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
+            bd_rate_psnr = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method=method)
+            bd_psnr = bd.bd_psnr(rate_anchor, psnr_anchor, rate_test, psnr_test, method=method)
 
             with open(out_file, "a") as f:
                 f.write(f"Codec {codec} for {video}\n")
@@ -63,15 +63,15 @@ def compute_bd(metrics, anchor, out_dir):
             for detection_model in detection_models:
                 map_test = [info['mean_ap'][detection_model]['map'] for info in metrics[codec][video]]
                 map_test = fix_curve(map_test)
-                bd_rate_map = bd.bd_rate(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
-                bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
+                bd_rate_map = bd.bd_rate(rate_anchor, map_anchors[detection_model], rate_test, map_test, method=method)
+                bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method=method)
                 with open(out_file, "a") as f:
                     f.write(f"\tBD-mAP for model {detection_model}\n")
                     f.write(f"\t\tBD-Rate (mAP): {bd_rate_map:.4f} %\n")
                     f.write(f"\t\tBD-mAP: {bd_map:.4f} %\n")
 
 
-def compute_bd_gop(metrics, anchor, out_dir):
+def compute_bd_gop(metrics, anchor, method, out_dir):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
     gop_metrics = {}
@@ -109,8 +109,8 @@ def compute_bd_gop(metrics, anchor, out_dir):
                 rate_test = [info['bpp'] for info in gop_metrics[codec][gop][video]]
                 psnr_test = [info['psnr'] for info in gop_metrics[codec][gop][video]]
 
-                bd_rate_psnr = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
-                bd_psnr = bd.bd_psnr(rate_anchor, psnr_anchor, rate_test, psnr_test, method='akima')
+                bd_rate_psnr = bd.bd_rate(rate_anchor, psnr_anchor, rate_test, psnr_test, method=method)
+                bd_psnr = bd.bd_psnr(rate_anchor, psnr_anchor, rate_test, psnr_test, method=method)
 
                 with open(out_file, "a") as f:
                     f.write(f"\tGOP {gop} for {video}\n")
@@ -120,8 +120,8 @@ def compute_bd_gop(metrics, anchor, out_dir):
                     map_test = [info['mean_ap'][detection_model]['map'] for info in gop_metrics[codec][gop][video]]
                     map_test = fix_curve(map_test)
                     bd_rate_map = bd.bd_rate(rate_anchor, map_anchors[detection_model], rate_test, map_test,
-                                             method='akima')
-                    bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method='akima')
+                                             method=method)
+                    bd_map = bd.bd_psnr(rate_anchor, map_anchors[detection_model], rate_test, map_test, method=method)
                     with open(out_file, "a") as f:
                         f.write(f"\t\tBD-mAP for model {detection_model}\n")
                         f.write(f"\t\t\tBD-Rate (mAP): {bd_rate_map:.4f} %\n")
@@ -137,6 +137,8 @@ def main():
                         default="outputs/benchmark/decod", help="Path to output dir")
     parser.add_argument("--anchor", dest="anchor", required=False, type=str,
                         default="HEVC veryslow", help="Anchor name")
+    parser.add_argument("--method", dest="method", required=False, type=str,
+                        default="pchip", help="Approximation method for curves")
     parser.add_argument("--compare-gop", dest="compare_gop", required=False, type=str2bool,
                         default=False, help="Compare metrics for GOP")
 
@@ -163,9 +165,9 @@ def main():
 
     os.makedirs(args.out_path, exist_ok=True)
     if args.compare_gop:
-        compute_bd_gop(metrics, args.anchor, args.out_path)
+        compute_bd_gop(metrics, args.anchor, args.method, args.out_path)
     else:
-        compute_bd(metrics, args.anchor, args.out_path)
+        compute_bd(metrics, args.anchor, args.method, args.out_path)
 
 if __name__ == '__main__':
     main()
