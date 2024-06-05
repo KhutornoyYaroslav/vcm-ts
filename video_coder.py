@@ -3,6 +3,7 @@ import json
 import os
 import pickle
 import shutil
+import time
 from glob import glob
 from subprocess import call
 
@@ -56,22 +57,28 @@ def video_to_frames(video_path: str,
     # Process video
     logger.info("Splitting video to frames")
     cnt = 0
+    decode_time = 0
     pbar = tqdm(total=get_video_length(video_path, True))
     while 1:
+        t0 = time.time()
         ret, frame = cap.read()
         if not ret:
             break
 
         cv.imwrite(os.path.join(res_folder, filename_template % (cnt + 1)), frame)
+        t1 = time.time()
         cnt += 1
+        decode_time += t1 - t0
         pbar.update(1)
     pbar.close()
+    logger.info(f"H.265 decoding time {(decode_time) / cnt * 1000:.2f} ms for {cnt} frames")
     logger.info(f"Video splitting results in {cnt} frames")
 
     return cnt
 
 
 def run_dcvc(video_net, i_frame_net, args, device):
+    logger = logging.getLogger(_LOGGER_NAME)
     frame_num = args['frame_num']
     gop = args['gop']
     write_stream = 'write_stream' in args and args['write_stream']
@@ -84,6 +91,8 @@ def run_dcvc(video_net, i_frame_net, args, device):
     decoded_frames_folder = args['decoded_frame_folder']
     shutil.rmtree(decoded_frames_folder, ignore_errors=True)
     os.makedirs(decoded_frames_folder, exist_ok=True)
+    encoding_time = 0
+    decoding_time = 0
 
     with torch.no_grad():
         for frame_idx in tqdm(range(frame_num)):
@@ -135,8 +144,15 @@ def run_dcvc(video_net, i_frame_net, args, device):
             recon_frame = recon_frame.clamp_(0, 1)
             x_hat = F.pad(recon_frame, (-padding_l, -padding_r, -padding_t, -padding_b))
 
+            encoding_time += result['encoding_time']
+            decoding_time += result['decoding_time']
+
             save_path = os.path.join(decoded_frames_folder, f'im{str(frame_idx + 1).zfill(5)}.png')
             save_torch_image(x_hat, save_path)
+
+    logger.info(f"Average encoding time {encoding_time / frame_num * 1000:.2f} ms")
+    logger.info(f"Average decoding time {decoding_time / frame_num * 1000:.2f} ms")
+    logger.info(f"Reserved GPU memory {torch.cuda.memory_reserved() / 1024 / 1024:.2f} mb")
 
 
 def encode_decode_dcvc(frames_dir: str,
@@ -224,6 +240,7 @@ def detect_liplates(root: str,
                     device: str = 'cuda',
                     filename_template: str = "%05d"):
     logger = logging.getLogger(_LOGGER_NAME)
+    torch.cuda.empty_cache()
 
     assert prob > 0.0
     assert padding >= 0
@@ -247,10 +264,12 @@ def detect_liplates(root: str,
     # Process frames
     logger.info('Detecting license plates')
     src_reader = PNGReader(src_folder)
+    detect_time = 0
     for i in tqdm(range(len(source_images))):
         rgb = src_reader.read_one_frame(src_format="rgb")
         image = np_image_to_tensor(rgb)
         image = image.to(device)
+        t0 = time.time()
         n, c, h, w = image.shape
         padding_l, padding_r, padding_t, padding_b = get_padding_size(h, w, p=32)
         image_padded = torch.nn.functional.pad(
@@ -275,12 +294,16 @@ def detect_liplates(root: str,
             y1 = max(min(int(y1 - padding), h), 0)
             y2 = max(min(int(y2 + padding), h), 0)
             lp_coords.append([x1, y1, x2, y2])
+        t1 = time.time()
+        detect_time += t1 - t0
 
         # Serialize coordinates
         filename = os.path.join(res_folder, filename_template % (i + 1))
         file = open(filename, 'wb')
         pickle.dump(np.array(lp_coords, dtype=np.uint16), file)
         file.close()
+    logger.info(f"Average detecting license plates time {detect_time / len(source_images) * 1000:.2f} ms")
+    logger.info(f"Reserved GPU memory {torch.cuda.memory_reserved() / 1024 / 1024:.2f} mb")
     logger.info(f"License plates coordinates saved to '{res_folder}'")
 
 
@@ -290,6 +313,7 @@ def detect_faces(root: str,
                  device: str = 'cuda',
                  filename_template: str = "%05d"):
     logger = logging.getLogger(_LOGGER_NAME)
+    torch.cuda.empty_cache()
 
     assert prob > 0.0
     assert padding >= 0
@@ -313,6 +337,7 @@ def detect_faces(root: str,
     # Process frames
     logger.info('Detecting faces')
     cnt = 1
+    detect_time = 0
     pbar = tqdm(total=len(filelist))
     for src_file in filelist:
         src_frame = cv.imread(src_file)
@@ -320,6 +345,7 @@ def detect_faces(root: str,
         h, w, c = src_frame.shape
 
         # Detect faces
+        t0 = time.time()
         face_bbs, face_probs = face_detector.detect(src_frame, landmarks=False)
 
         # Filter faces
@@ -333,6 +359,8 @@ def detect_faces(root: str,
                 y1 = max(min(int(y1 - padding), h), 0)
                 y2 = max(min(int(y2 + padding), h), 0)
                 face_coords.append([x1, y1, x2, y2])
+        t1 = time.time()
+        detect_time += t1 - t0
 
         # Serialize coordinates
         filename = os.path.join(res_folder, filename_template % cnt)
@@ -343,6 +371,8 @@ def detect_faces(root: str,
 
         pbar.update(1)
     pbar.close()
+    logger.info(f"Average detecting faces time {detect_time / len(filelist) * 1000:.2f} ms")
+    logger.info(f"Reserved GPU memory {torch.cuda.memory_reserved() / 1024 / 1024:.2f} mb")
     logger.info(f"Faces coordinates saved to '{res_folder}'")
 
 
@@ -374,14 +404,19 @@ def compute_residuals(root: str,
     # Process frames
     logger.info('Compute residuals')
     cnt = 1
+    residual_time = 0
+    mask_time = 0
     pbar = tqdm(total=len(source_frames))
     for source_frame_path, encoded_frame_path in zip(source_frames, encoded_frames):
         # Compute
         source_frame = cv.imread(source_frame_path).astype(np.float32)
         encoded_frame = cv.imread(encoded_frame_path).astype(np.float32)
         h, w, c = source_frame.shape
+        t0_residual = time.time()
         residual = source_frame - encoded_frame
         residual = np.clip(residual + 128, 0.0, 255.0)
+        t1_residual = time.time()
+        residual_time += t1_residual - t0_residual
 
         # Read liplates bounding boxes
         lp_bboxes = []
@@ -398,6 +433,7 @@ def compute_residuals(root: str,
             f.close()
 
         # Create foreground mask
+        t0_mask = time.time()
         mask = np.zeros(shape=(h, w, 1), dtype=np.float32)
         for [x1, y1, x2, y2] in lp_bboxes:
             mask[y1:y2, x1:x2] = 1.0
@@ -407,6 +443,8 @@ def compute_residuals(root: str,
         # Create result frame
         result_frame = residual.astype(np.float32) * mask
         result_frame = result_frame.astype(np.uint8)
+        t1_mask = time.time()
+        mask_time += t1_mask - t0_mask
 
         # Save result
         img_path = os.path.join(out_residuals_dir, filename_template % cnt)
@@ -414,6 +452,8 @@ def compute_residuals(root: str,
         cnt += 1
         pbar.update(1)
     pbar.close()
+    logger.info(f"Average residual computing time {residual_time / len(source_frames) * 1000:.2f} ms")
+    logger.info(f"Average masking time {mask_time / len(source_frames) * 1000:.2f} ms")
     logger.info(f"Residuals saved to '{out_residuals_dir}'")
 
 
@@ -461,7 +501,11 @@ def encode_frames(src_root: str,
     # Call encoder
     logger.info(f"Encoding '{src_files}' frames to '{video_path}'")
     os.makedirs(os.path.dirname(video_path), exist_ok=True)
+    t0 = time.time()
     encode_folder_crf(src_files, video_path, crf=crf, preset=preset, pix_fmt=pix_fmt)
+    t1 = time.time()
+    source_frames = sorted(glob(os.path.join(src_root, "*.png")))
+    logger.info(f"H.265 encoding time {(t1 - t0) / len(source_frames) * 1000:.2f} ms for {len(source_frames)} frames")
 
     # Encoded video to frames
     if save_to_frames:
@@ -519,6 +563,7 @@ def fuse_layers(root: str,
     # Process frames
     logger.info('Creating result frames')
     cnt = 0
+    fuse_time = 0
     pbar = tqdm(total=len(dcvc_hem_filelist))
     for dcvc_hem_file, enhancement_file in zip(dcvc_hem_filelist, enhancement_filelist):
         # Read frames
@@ -549,10 +594,13 @@ def fuse_layers(root: str,
             mask[y1:y2, x1:x2] = create_gradient_mask(w=x2 - x1, h=y2 - y1, border_size=faces_padding)
 
         # Process
+        t0 = time.time()
         result_frame = dcvc_hem_frame
         result_frame += mask * enhancement_frame
         result_frame = np.clip(result_frame, 0, 255)
         result_frame = result_frame.astype(np.uint8)
+        t1 = time.time()
+        fuse_time += t1 - t0
 
         # Save result
         img_path = os.path.join(res_folder, filename_template % (cnt + 1))
@@ -561,6 +609,7 @@ def fuse_layers(root: str,
 
         pbar.update(1)
     pbar.close()
+    logger.info(f"Average fusing time {fuse_time / cnt * 1000:.2f} ms")
     logger.info(f'Created {cnt} result frames')
 
 
