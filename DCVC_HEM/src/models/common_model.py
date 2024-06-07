@@ -4,9 +4,8 @@
 import math
 
 import torch
-from torch import nn
-
 from pytorch_msssim import MS_SSIM
+from torch import nn
 
 from .video_net import LowerBound
 from ..entropy_models.entropy_models import BitEstimator, GaussianEncoder, EntropyCoder

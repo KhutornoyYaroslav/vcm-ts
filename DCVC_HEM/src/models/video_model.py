@@ -538,7 +538,7 @@ class DMC(CompressionModel):
         B, _, H, W = x.size()
         pixel_num = H * W
         mse = self.mse(x, recon_image)
-        ssim = self.ssim(x, recon_image)
+        # ssim = self.ssim(x, recon_image)
         me_mse = self.mse(x, warp_frame)
         mse = torch.sum(mse, dim=(1, 2, 3)) / pixel_num
         me_mse = torch.sum(me_mse, dim=(1, 2, 3)) / pixel_num
@@ -577,7 +577,7 @@ class DMC(CompressionModel):
                 "bpp": bpp,
                 "me_mse": me_mse,
                 "mse": mse,
-                "ssim": ssim,
+                # "ssim": ssim,
                 "dpb": {
                     "ref_frame": recon_image,
                     "ref_feature": feature,

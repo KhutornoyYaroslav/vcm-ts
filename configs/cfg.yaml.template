@@ -1,0 +1,47 @@
+DATASET:
+  SEQUENCE_LENGTH: 7
+  SEQUENCE_STRIDE: 1
+  SUBDIR_INPUTS: ''
+  METADATA_PATH: ''
+  OD_GOP_SIZE: 32
+  OD_STAGE: 5
+  TEST_OD_ROOT_DIRS: []
+  TEST_ROOT_DIRS: []
+  TEST_SUBDIR_LISTS: []
+  TRAIN_ROOT_DIRS: ['path/to/dir']
+  TRAIN_SUBDIR_LISTS: ['path/to/txt']
+  TYPE: SequenceDataset
+DATA_LOADER:
+  NUM_WORKERS: 8
+  PIN_MEMORY: True
+INPUT:
+  IMAGE_SIZE: [256, 256]
+  MAKE_DIVISIBLE_BY: 16
+MODEL:
+  ARCHITECTURE: DCVC_HEM
+  DEVICE: cuda
+  PRETRAINED_WEIGHTS: ''
+  I_FRAME_PRETRAINED_WEIGHTS: ''
+OUTPUT_DIR: outputs/test
+SOLVER:
+  LAMBDAS: [85, 170, 380, 840]
+  PL_MODEL: vgg
+  PL_LAYERS: ['1', '2', '3', '4']
+  PL_LAMBDA: 1.0
+  DIST_LAMBDA: 1.0
+  LR: 0.0001
+  STAGES: [
+    ['1', 'me', 'single', 'me', 'none', '1e-4', '1', 'vgg'],
+    ['1', 'me', 'single', 'me', 'me', '1e-4', '3', 'vgg'],
+    ['1', 'rec', 'single', 'rec', 'none', '1e-4', '3', 'vgg'],
+    ['1', 'rec', 'single', 'rec', 'rec', '1e-4', '3', 'vgg'],
+    ['1', 'all', 'single', 'rec', 'all', '1e-4', '6', 'vgg'],
+    ['2', 'all', 'single', 'rec', 'all', '1e-4', '5', 'vgg'],
+    ['4', 'all', 'single', 'rec', 'all', '1e-4', '3', 'vgg'],
+    ['4', 'all', 'single', 'rec', 'all', '1e-5', '1', 'vgg'],
+    ['4', 'all', 'cascade', 'rec', 'all', '5e-5', '2', 'vgg'],
+    ['4', 'all', 'cascade', 'rec', 'all', '1e-5', '3', 'vgg']
+  ]
+TENSORBOARD:
+  BEST_SAMPLES_NUM: 16
+  WORST_SAMPLES_NUM: 16

@@ -1,10 +1,11 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
+import time
 
 import torch
 from torch import nn
 
-from src.layers.layers import conv3x3
+from DCVC_HEM.src.layers.layers import conv3x3
 
 from .common_model import CompressionModel
 from .video_net import LowerBound, UNet, get_enc_dec_models, get_hyper_enc_dec_models
@@ -83,7 +84,7 @@ class IntraNoAR(CompressionModel):
         bits_y = self.get_y_gaussian_bits(y_for_bit, scales_hat)
         bits_z = self.get_z_bits(z_for_bit, self.bit_estimator_z)
         mse = self.mse(x, x_hat)
-        ssim = self.ssim(x, x_hat)
+        # ssim = self.ssim(x, x_hat)
 
         _, _, H, W = x.size()
         pixel_num = H * W
@@ -97,7 +98,7 @@ class IntraNoAR(CompressionModel):
         return {
             "x_hat": x_hat,
             "mse": mse,
-            "ssim": ssim,
+            # "ssim": ssim,
             "bit": bits.item(),
             "bpp": bpp,
             "bpp_y": bpp_y,
@@ -118,6 +119,7 @@ class IntraNoAR(CompressionModel):
 
         assert pic_height is not None
         assert pic_width is not None
+        t0 = time.time()
         # Округление q_scale до 2 знаков (q_index = q_scale * 100)
         q_scale, q_index = get_rounded_q(q_scale)
         # Сжатие исходного изображения в битстрим
@@ -126,16 +128,20 @@ class IntraNoAR(CompressionModel):
         # Запись битстрима в бинарный файл на диске
         encode_i(pic_height, pic_width, q_index, bit_stream, output_path)
         bit = filesize(output_path) * 8
+        t1 = time.time()
 
         # Чтение битстрима из бинарного файла
         height, width, q_index, bit_stream = decode_i(output_path)
         # Декомпрессия битстрима в выходное изображение
         decompressed = self.decompress(bit_stream, height, width, q_index / 100)
+        t2 = time.time()
         x_hat = decompressed['x_hat']
 
         result = {
             'bit': bit,
             'x_hat': x_hat,
+            "encoding_time": t1 - t0,
+            "decoding_time": t2 - t1
         }
         return result
 

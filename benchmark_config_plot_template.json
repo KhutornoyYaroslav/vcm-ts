@@ -1,0 +1,40 @@
+{
+    "dataset_dir": "data/huawei/outputs/benchmark/dataset",
+    "decoded_dir": "data/huawei/outputs/decod",
+    "device": "cuda",
+    "out_path": "outputs/benchmark/decod",
+    "ms_ssim": false,
+    "compare_gop": false,
+    "language": "ru",
+    "labels_start_index": 1,
+    "sequences": [
+        {
+            "name": "test_0_short",
+            "annotation_types": ["object_detection"]
+        },
+        {
+            "name": "test_10_short",
+            "annotation_types": ["object_detection"]
+        },
+        {
+            "name": "test_18_short",
+            "annotation_types": ["object_detection"]
+        },
+        {
+            "name": "test_21_short",
+            "annotation_types": ["object_detection"]
+        },
+        {
+            "name": "test_14_liplates",
+            "annotation_types": ["license_detection", "license_recognition"]
+        },
+        {
+            "name": "test_18_liplates",
+            "annotation_types": ["license_detection", "license_recognition"]
+        },
+        {
+            "name": "test_20_liplates",
+            "annotation_types": ["license_detection", "license_recognition"]
+        }
+    ]
+}

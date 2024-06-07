@@ -8,11 +8,9 @@ from PIL import Image
 
 
 class PNGReader():
-    def __init__(self, src_folder, width, height):
+    def __init__(self, src_folder):
         self.src_folder = src_folder
         pngs = os.listdir(self.src_folder)
-        self.width = width
-        self.height = height
         if 'im1.png' in pngs:
             self.padding = 1
         elif 'im00001.png' in pngs:
@@ -22,7 +20,7 @@ class PNGReader():
         self.current_frame_index = 1
         self.eof = False
 
-    def read_one_frame(self, src_format="rgb"):
+    def read_one_frame(self, src_format="rgb", get_png_path=False):
         def _none_exist_frame():
             if src_format == "rgb":
                 return None
@@ -40,11 +38,12 @@ class PNGReader():
         rgb = Image.open(png_path).convert('RGB')
         rgb = np.asarray(rgb).astype('float32').transpose(2, 0, 1)
         rgb = rgb / 255.
-        _, height, width = rgb.shape
-        assert height == self.height
-        assert width == self.width
 
         self.current_frame_index += 1
+
+        if get_png_path:
+            return rgb, png_path
+
         return rgb
 
     def close(self):

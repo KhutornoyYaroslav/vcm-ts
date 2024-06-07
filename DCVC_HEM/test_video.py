@@ -86,7 +86,8 @@ def run_test(video_net, i_frame_net, args, device):
 
     # Инициализация читателя изображений
     if args['src_type'] == 'png':
-        src_reader = PNGReader(args['img_path'], args['src_width'], args['src_height'])
+        # src_reader = PNGReader(args['img_path'], args['src_width'], args['src_height'])
+        src_reader = PNGReader(args['img_path'])
 
     frame_types = []
     psnrs = []
@@ -185,7 +186,7 @@ def encode_one(args, device):
     # Загрузка весов модели для изображений и её дальнейшая инициализация
     i_state_dict = get_state_dict(args['i_frame_model_path'])
     i_frame_net = IntraNoAR()
-    i_frame_net.load_state_dict(i_state_dict)
+    i_frame_net.load_state_dict(i_state_dict, strict=False)
     i_frame_net = i_frame_net.to(device)
     i_frame_net.eval()
 
@@ -195,7 +196,7 @@ def encode_one(args, device):
     else:
         p_state_dict = get_state_dict(args['model_path'])
         video_net = DMC()
-        video_net.load_state_dict(p_state_dict)
+        video_net.load_state_dict(p_state_dict, strict=False)
         video_net = video_net.to(device)
         video_net.eval()
 
