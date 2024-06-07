@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from PIL import Image
 from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 
 
@@ -141,3 +142,13 @@ def decode_p(inputpath):
         string = read_bytes(f, string_length)
 
     return mv_y_q_index, y_q_index, string
+
+def np_image_to_tensor(img):
+    image = torch.from_numpy(img).type(torch.FloatTensor)
+    image = image.unsqueeze(0)
+    return image
+
+def save_torch_image(img, save_path):
+    img = img.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
+    img = np.clip(np.rint(img * 255), 0, 255).astype(np.uint8)
+    Image.fromarray(img).save(save_path)

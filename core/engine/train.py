@@ -244,7 +244,7 @@ def do_train(cfg,
 
         total_iterations = 0
         for iteration, data_entry in pbar:
-            global_step = epoch * iters_per_epoch + iteration
+            global_step = epoch * iters_per_epoch + iteration + 1
 
             # Get data
             input, target = data_entry  # (N, T, C, H, W)

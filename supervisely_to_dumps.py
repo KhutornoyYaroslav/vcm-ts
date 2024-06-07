@@ -1,10 +1,11 @@
-import os
-import json
-import shutil
 import argparse
-import cv2 as cv
+import json
+import os
+import shutil
 from glob import glob
 from subprocess import call
+
+import cv2 as cv
 
 _YOLO_CLASS_ID_MAP = {
     'person': 0,
@@ -44,7 +45,6 @@ def visualize_anno(video_path: str, result_root: str, color_map):
         return -1
 
     detector_filelist = sorted(glob(os.path.join(result_root, 'detector_yolo', '0000', "*.json")))
-    # lpdetector_filelist = sorted(glob(os.path.join(result_root, 'lpdetector_yolo', '0000', "*.json")))
     lprdetector_filelist = sorted(glob(os.path.join(result_root, 'lprdetector_yolo', '0000', "*.json")))
 
     for detector_file, lprdetector_file in zip(detector_filelist, lprdetector_filelist):
@@ -190,23 +190,23 @@ def main():
     args = parser.parse_args()
 
     anno_paths = [
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_0_short.mp4.json",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_10_short.mp4.json",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_18_short.mp4.json",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_21_short.mp4.json",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_liplates/ds0/ann/test_14_liplates.mp4.json",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_liplates/ds0/ann/test_18_liplates.mp4.json",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/huawei_liplates/ds0/ann/test_20_liplates.mp4.json"
+        "data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_0_short.mp4.json",
+        "data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_10_short.mp4.json",
+        "data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_18_short.mp4.json",
+        "data/huawei/outputs/benchmark/huawei_tests/ds0/ann/test_21_short.mp4.json",
+        "data/huawei/outputs/benchmark/huawei_liplates/ds0/ann/test_14_liplates.mp4.json",
+        "data/huawei/outputs/benchmark/huawei_liplates/ds0/ann/test_18_liplates.mp4.json",
+        "data/huawei/outputs/benchmark/huawei_liplates/ds0/ann/test_20_liplates.mp4.json"
     ]
-    out_path = "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/dataset"
+    out_path = "data/huawei/outputs/benchmark/dataset"
     video_paths = [
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_0_short.mp4",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_10_short.mp4",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_18_short.mp4",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_21_short.mp4",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_14_liplates.mp4",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_18_liplates.mp4",
-        "/home/alexnevskiy/PycharmProjects/vcm-ts/data/huawei/outputs/benchmark/test_20_liplates.mp4"
+        "data/huawei/outputs/benchmark/test_0_short.mp4",
+        "data/huawei/outputs/benchmark/test_10_short.mp4",
+        "data/huawei/outputs/benchmark/test_18_short.mp4",
+        "data/huawei/outputs/benchmark/test_21_short.mp4",
+        "data/huawei/outputs/benchmark/test_14_liplates.mp4",
+        "data/huawei/outputs/benchmark/test_18_liplates.mp4",
+        "data/huawei/outputs/benchmark/test_20_liplates.mp4"
     ]
 
     for anno_path, video_path in zip(anno_paths, video_paths):
@@ -223,9 +223,6 @@ def main():
     with open(metadata_path, 'w') as f:
         for _class, _number in _COCO_CLASS_ID_MAP.items():
             f.write('%d: %s\n' % (_number, _class))
-
-    # convert_anno(args.anno_path, args.result_root, _COCO_CLASS_ID_MAP)
-    # visualize_anno(args.video_path, args.result_root, _COLOR_MAP)
 
 
 if __name__ == '__main__':

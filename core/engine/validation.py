@@ -8,8 +8,10 @@ from torchmetrics.detection import MeanAveragePrecision
 from tqdm import tqdm
 from ultralytics import YOLO
 
-from DCVC_HEM.src.utils.stream_helper import get_padding_size
-from core.engine.losses import FasterRCNNFPNPerceptualLoss, FasterRCNNPerceptualLoss
+from DCVC_HEM.src.models.image_model import IntraNoAR
+from DCVC_HEM.src.utils.common import interpolate_log
+from DCVC_HEM.src.utils.stream_helper import get_padding_size, get_state_dict
+from core.engine.losses import FasterRCNNFPNPerceptualLoss, FasterRCNNResNetPerceptualLoss
 from core.utils.tensorboard import add_best_and_worst_sample
 
 
@@ -67,19 +69,19 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
     logger = logging.getLogger("CORE.inference")
 
     # Iteration loop
+    n = len(cfg.SOLVER.LAMBDAS)
     stats = {
         'loss_sum': 0,
         'dist': 0,
         'p_dist': 0,
-        'bpp': 0,
-        'psnr': 0,
+        'bpp': np.zeros(n),
+        'psnr': np.zeros(n),
         'mean_ap': [],
         'best_samples': [],
         'worst_samples': []
     }
 
     sample_count = 0
-    n = len(cfg.SOLVER.LAMBDAS)
     best_samples = [[] for _ in range(n)]
     worst_samples = [[] for _ in range(n)]
     for data_entry in tqdm(data_loader):
@@ -112,9 +114,24 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
 
         add_best_and_worst_sample(cfg, outputs, best_samples, worst_samples)
 
+    if i_frame_net is None:
+        rate_count = len(cfg.SOLVER.LAMBDAS)
+        i_frame_q_scales = IntraNoAR.get_q_scales_from_ckpt('pretrained/acmmm2022_image_psnr.pth')
+        if len(i_frame_q_scales) == rate_count:
+            pass
+        else:
+            max_q_scale = i_frame_q_scales[0]
+            min_q_scale = i_frame_q_scales[-1]
+            i_frame_q_scales = interpolate_log(min_q_scale, max_q_scale, rate_count)
+
+        i_state_dict = get_state_dict('pretrained/acmmm2022_image_psnr.pth')
+        i_frame_net = IntraNoAR()
+        i_frame_net.load_state_dict(i_state_dict, strict=False)
+        i_frame_net = i_frame_net.cuda()
+        i_frame_net.eval()
     if object_detection_loader is not None and stage >= cfg.DATASET.OD_STAGE:
         if (isinstance(model.perceptual_loss, FasterRCNNFPNPerceptualLoss) or
-                isinstance(model.perceptual_loss, FasterRCNNPerceptualLoss)):
+                isinstance(model.perceptual_loss, FasterRCNNResNetPerceptualLoss)):
             detector = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(min_size=1088, max_size=1920)
             detector.load_state_dict(torch.load('pretrained/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth'))
             detector.cuda()
@@ -166,7 +183,7 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
                     input_to_detect = dpb[i]["ref_frame"]  # (N, C, H, W)
                     input_to_detect = input_to_detect.clamp(0, 1)
                     if (isinstance(model.perceptual_loss, FasterRCNNFPNPerceptualLoss) or
-                            isinstance(model.perceptual_loss, FasterRCNNPerceptualLoss)):
+                            isinstance(model.perceptual_loss, FasterRCNNResNetPerceptualLoss)):
                         output = forward_rcnn(detector, input_to_detect)
                     else:
                         output = forward_yolo(detector, input_to_detect)
@@ -178,10 +195,12 @@ def eval_dataset(model, forward_method, loss_dist_key, loss_rate_keys, p_frames,
         for i in range(n):
             metric_map.update(output_annotations[i], source_annotations[i])
             map_metrics = metric_map.compute()
-            mean_ap = map_metrics['map_50'].item() * 100
+            mean_ap = map_metrics['map'].item() * 100
             stats['mean_ap'].append(mean_ap)
 
     # Return results
+    if sample_count == 0:
+        sample_count = 1
     stats['loss_sum'] /= sample_count
     stats['dist'] /= sample_count
     stats['p_dist'] /= sample_count

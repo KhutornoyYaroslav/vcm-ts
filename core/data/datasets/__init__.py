@@ -1,4 +1,4 @@
-from .SequenceDataset import SequenceDataset
+from .sequence_dataset import SequenceDataset
 
 
 _DATASET_TYPES = {

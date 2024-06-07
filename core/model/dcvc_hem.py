@@ -1,11 +1,10 @@
 from typing import List
 
-import lpips
 import torch
 from torch import nn
 
 from DCVC_HEM.src.models.video_model import DMC
-from core.engine.losses import VGGPerceptualLoss, FasterRCNNFPNPerceptualLoss, YOLOV8PerceptualLoss, LPIPSPerceptualLoss
+from core.engine.losses import FasterRCNNFPNPerceptualLoss, YOLOV8PerceptualLoss, FasterRCNNResNetPerceptualLoss
 
 
 class DCVC_HEM(nn.Module):
@@ -42,32 +41,13 @@ class DCVC_HEM(nn.Module):
             self.dmc.y_q_scale
         ]
 
-        # -------- self.recon_modules_dist --------
-        # bit_estimator_z                   +
-        # context_fusion_net                +
-        # contextual_decoder                +
-        # contextual_encoder                +
-        # contextual_hyper_prior_decoder    +
-        # contextual_hyper_prior_encoder    +
-        # recon_generation_net              +
-        # y_prior_fusion                    +
-        # y_spatial_prior                   +
-        # temporal_prior_encoder            +
-        # feature_adaptor_I                 +
-        # feature_adaptor_P                 +
-        # feature_extractor                 +
-
     def get_perceptual_loss(this, cfg):
-        if cfg.SOLVER.PL_MODEL == 'vgg':
-            perceptual_loss = VGGPerceptualLoss()
-        elif cfg.SOLVER.PL_MODEL == 'rcnn':
+        if cfg.SOLVER.PL_MODEL == 'resnet':
+            perceptual_loss = FasterRCNNResNetPerceptualLoss()
+        elif cfg.SOLVER.PL_MODEL == 'fpn':
             perceptual_loss = FasterRCNNFPNPerceptualLoss()
         elif cfg.SOLVER.PL_MODEL == 'yolo':
             perceptual_loss = YOLOV8PerceptualLoss()
-        elif cfg.SOLVER.PL_MODEL == 'lpips_linear':
-            perceptual_loss = LPIPSPerceptualLoss(use_lpips=True, use_dropout=True)
-        elif cfg.SOLVER.PL_MODEL == 'lpips_no_linear':
-            perceptual_loss = LPIPSPerceptualLoss(use_lpips=False, use_dropout=False)
         else:
             raise SystemError('Invalid perceptual loss')
 
@@ -155,6 +135,10 @@ class DCVC_HEM(nn.Module):
                 Perceptual loss usage
             is_train: bool
                 Train or eval mode
+            i_frame_net: torch.nn.Module
+                I-frame model for coding 1 image in GOP
+            i_frame_q_scales: List[float]
+                q-scales values for i-frame model
         """
         n, t, c, h, w = input.shape
         assert 0 < p_frames < t
@@ -221,13 +205,14 @@ class DCVC_HEM(nn.Module):
                 dist = output[loss_dist_key]
 
                 if perceptual_loss:
-                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'],
+                                                           feature_layers=self.cfg.SOLVER.PL_LAYERS)
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
                 loss = rate + lambdas * (dist * self.dist_lambda + perceptual_dist * self.pl_lambda)
                 loss_to_opt = torch.mean(loss)  # (N) -> (1)
-                
+
                 loss_list.append(loss)
 
                 if is_train:
@@ -258,9 +243,11 @@ class DCVC_HEM(nn.Module):
         result['loss'] = torch.stack(result['loss'], -1)  # (N, (T - p_frames) * p_frames)
         result['loss_seq'] = torch.stack(result['loss_seq'], -1)  # (N, T - p_frames)
         result['input_seqs'] = torch.stack(result['input_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
-        result['input_seqs'] = result['input_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+        result['input_seqs'] = result['input_seqs'].permute(0, 5, 4, 1, 2,
+                                                            3)  # (N, T - p_frames, p_frames + 1, C, H, W)
         result['decod_seqs'] = torch.stack(result['decod_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
-        result['decod_seqs'] = result['decod_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+        result['decod_seqs'] = result['decod_seqs'].permute(0, 5, 4, 1, 2,
+                                                            3)  # (N, T - p_frames, p_frames + 1, C, H, W)
 
         return result
 
@@ -313,7 +300,8 @@ class DCVC_HEM(nn.Module):
         dist = output[loss_dist_key]
 
         if perceptual_loss:
-            perceptual_dist = self.perceptual_loss(target, output['dpb']['ref_frame'])
+            perceptual_dist = self.perceptual_loss(target, output['dpb']['ref_frame'],
+                                                   feature_layers=self.cfg.SOLVER.PL_LAYERS)
         else:
             perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -367,6 +355,10 @@ class DCVC_HEM(nn.Module):
                 Perceptual loss usage
             is_train: bool
                 Train or eval mode
+            i_frame_net: torch.nn.Module
+                I-frame model for coding 1 image in GOP
+            i_frame_q_scales: List[float]
+                q-scales values for i-frame model
         """
         n, t, c, h, w = input.shape
         assert 0 < p_frames < t
@@ -435,7 +427,8 @@ class DCVC_HEM(nn.Module):
                 dist = output[loss_dist_key]
 
                 if perceptual_loss:
-                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                    perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'],
+                                                           feature_layers=self.cfg.SOLVER.PL_LAYERS)
                 else:
                     perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -481,9 +474,11 @@ class DCVC_HEM(nn.Module):
         result['loss'] = torch.stack(result['loss'], -1)  # (N, T - p_frames)
         result['loss_seq'] = result['loss']  # (N, T - p_frames)
         result['input_seqs'] = torch.stack(result['input_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
-        result['input_seqs'] = result['input_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+        result['input_seqs'] = result['input_seqs'].permute(0, 5, 4, 1, 2,
+                                                            3)  # (N, T - p_frames, p_frames + 1, C, H, W)
         result['decod_seqs'] = torch.stack(result['decod_seqs'], -1)  # (N, C, H, W, p_frames + 1, T - p_frames)
-        result['decod_seqs'] = result['decod_seqs'].permute(0, 5, 4, 1, 2, 3)  # (N, T - p_frames, p_frames + 1, C, H, W)
+        result['decod_seqs'] = result['decod_seqs'].permute(0, 5, 4, 1, 2,
+                                                            3)  # (N, T - p_frames, p_frames + 1, C, H, W)
 
         return result
 
@@ -553,7 +548,8 @@ class DCVC_HEM(nn.Module):
             dist = output[loss_dist_key]
 
             if perceptual_loss:
-                perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'])
+                perceptual_dist = self.perceptual_loss(target[:, t_i + 1 + p_idx], output['dpb']['ref_frame'],
+                                                       feature_layers=self.cfg.SOLVER.PL_LAYERS)
             else:
                 perceptual_dist = torch.zeros_like(self.lambdas)
 
@@ -589,7 +585,6 @@ class DCVC_HEM(nn.Module):
         }
 
         return result
-
 
     def forward_simple(self,
                        input: torch.Tensor,

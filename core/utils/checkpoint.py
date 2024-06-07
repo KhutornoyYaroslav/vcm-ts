@@ -1,8 +1,8 @@
 import logging
 import os
+
 import torch
 from torch.nn.parallel import DistributedDataParallel
-from core.utils.model_zoo import cache_url
 
 
 class CheckPointer:
@@ -101,7 +101,8 @@ class CheckPointer:
                             val['step'] = torch.tensor(val['step'], dtype=torch.float32)
                             occurrences += 1
                 if occurrences > 0:
-                    self.logger.warn("Optimizer state steps were converted (int to tensor, {} occurrences)".format(occurrences))
+                    self.logger.warning(
+                        "Optimizer state steps were converted (int to tensor, {} occurrences)".format(occurrences))
 
                 self.optimizer.load_state_dict(opt_params)
             except ValueError:
@@ -141,10 +142,4 @@ class CheckPointer:
             f.write(last_filename)
 
     def _load_file(self, f):
-        # download url files
-        if f.startswith("http"):
-            # if the file is a url path, download it and cache it
-            cached_f = cache_url(f)
-            self.logger.info("url {} cached in {}".format(f, cached_f))
-            f = cached_f
         return torch.load(f, map_location=torch.device("cpu"))

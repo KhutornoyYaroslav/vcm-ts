@@ -13,5 +13,5 @@ def make_array_divisible_by(image: np.array, div_factor: int):
     if image.ndim == 4:
         padding.insert(0, (0, 0))
     image = np.pad(image, padding, mode='constant', constant_values=0)
-    
+
     return image

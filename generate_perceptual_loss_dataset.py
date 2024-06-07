@@ -31,7 +31,7 @@ def get_video_length(path, countable=False):
 
 def generate_data_video(src_root: str,
                         dst_root: str,
-                        resize_factor: int,
+                        min_height: int,
                         seq_length: int,
                         filename_template: str = "im%d.png"):
     logger = logging.getLogger(_LOGGER_NAME)
@@ -49,14 +49,45 @@ def generate_data_video(src_root: str,
         video_dir = os.path.join(sequences_dir, "%05d" % (source_video_index + 1))
         shutil.rmtree(video_dir, ignore_errors=True)
         os.makedirs(video_dir, exist_ok=True)
-        video2frames(source_video, video_dir, filename_template, sequences_list, resize_factor, seq_length)
+        video2frames(source_video, video_dir, filename_template, sequences_list, min_height, seq_length)
+
+
+def image_resize(image, width=None, height=None, inter=cv2.INTER_AREA):
+    # initialize the dimensions of the image to be resized and
+    # grab the image size
+    (h, w) = image.shape[:2]
+
+    # if both the width and height are None, then return the
+    # original image
+    if width is None and height is None:
+        return image
+
+    # check to see if the width is None
+    if width is None:
+        # calculate the ratio of the height and construct the
+        # dimensions
+        r = height / float(h)
+        dim = (int(w * r), height)
+
+    # otherwise, the height is None
+    else:
+        # calculate the ratio of the width and construct the
+        # dimensions
+        r = width / float(w)
+        dim = (width, int(h * r))
+
+    # resize the image
+    resized = cv2.resize(image, dim, interpolation=inter)
+
+    # return the resized image
+    return resized
 
 
 def video2frames(src_video: str,
                  video_dir: str,
                  filename_template: str,
                  sequences_list: str,
-                 resize_factor: int,
+                 min_height: int,
                  seq_length: int,
                  countable: bool = False,
                  seq_dir_template: str = "%04d"):
@@ -85,7 +116,7 @@ def video2frames(src_video: str,
         if not ret:
             break
 
-        frame = cv2.resize(frame, None, fx=resize_factor, fy=resize_factor, interpolation=cv2.INTER_AREA)
+        frame = image_resize(frame, height=min_height)
         cv.imwrite(frame_path % frame_count, frame)
         frame_count += 1
     cap_encoded.release()
@@ -98,11 +129,11 @@ def main():
                         default="data/huawei/outputs/benchmark/mp4",
                         help="Path to dataset root directory with videos")
     parser.add_argument('--dst-root', dest='dst_root', type=str,
-                        default="data/huawei_septuplet",
+                        default="data/huawei_septuplet_32",
                         help="Path where to save result dataset")
-    parser.add_argument('--resize-factor', dest='resize_factor', type=float, default=0.25,
+    parser.add_argument('--min-height', dest='min_height', type=float, default=512,
                         help="Resize factor for output images")
-    parser.add_argument('--seq-length', dest='seq_length', type=int, default=7,
+    parser.add_argument('--seq-length', dest='seq_length', type=int, default=32,
                         help="Number of frames in output sequences")
     args = parser.parse_args()
 
@@ -111,7 +142,7 @@ def main():
     logger.info(args)
 
     # Generate dataset from video
-    generate_data_video(args.src_root, args.dst_root, args.resize_factor, args.seq_length)
+    generate_data_video(args.src_root, args.dst_root, args.min_height, args.seq_length)
 
 
 if __name__ == '__main__':

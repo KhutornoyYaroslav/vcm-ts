@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torchvision
 from jiwer import cer
+from matplotlib.ticker import AutoMinorLocator
 from paddleocr import PaddleOCR
 from pytorch_msssim import MS_SSIM
 from torchmetrics.detection import MeanAveragePrecision
@@ -20,30 +21,46 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 from DCVC_HEM.src.utils.png_reader import PNGReader
-from DCVC_HEM.src.utils.stream_helper import get_padding_size
+from DCVC_HEM.src.utils.stream_helper import get_padding_size, np_image_to_tensor
 
 
-def np_image_to_tensor(img):
-    image = torch.from_numpy(img).type(torch.FloatTensor)
-    image = image.unsqueeze(0)
-    return image
+labels = {
+    "en": {
+        "orig_performance": "Original performance ({0:.2f}%)",
+        "loss_1": "1% mAP loss",
+        "loss_2": "2% mAP loss",
+        "obj_performance": "Object detection performance on {0} for {1}",
+        "class_performance": "Object detection performance for class {0} on {1} for {2}",
+        "matching": "Text matching on {0} for {1}",
+        "matching_value": "Metric value, %",
+        "rd_curve_psnr": "Rate and distortion curves (PSNR) for {0}",
+        "rd_curve_ssim": "Rate and distortion curves (MS-SSIM) for {0}",
+        "rd_metric_psnr": "PSNR, db",
+        "bbp_per_frame": "Bpp per frame for codec {0} and video {1}"
+    },
+    "ru": {
+        "orig_performance": "Исходная точность ({0:.2f}%)",
+        "loss_1": "1% mAP потери",
+        "loss_2": "2% mAP потери",
+        "obj_performance": "Сравнение зависимости mAP модели {0} от bpp для видео {1}",
+        "class_performance": "Сравнение зависимости mAP для класса {0} модели {1} от bpp для видео {2}",
+        "matching": "Соответствие текста по метрике {0} от bpp для видео {1}",
+        "matching_value": "Значение метрики, %",
+        "rd_curve_psnr": "Сравнение зависимости PSNR от bpp для видео {0}",
+        "rd_curve_ssim": "Сравнение зависимости MS-SSIM от bpp для видео {0}",
+        "rd_metric_psnr": "PSNR, Дб",
+        "bbp_per_frame": "Сравнение зависимости bpp от номера кадра в GOP для кодека {0} и видео {1}"
+    }
+}
+line_styles = ['o-', 'v--', 's-.', '*:']
+line_colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+               'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
 
 
 def get_psnr(input1, input2):
     mse = torch.mean((input1 - input2) ** 2)
     psnr = 20 * torch.log10(1 / torch.sqrt(mse))
     return psnr.item()
-
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    if v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-
-    raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 def delete_unsupported_annotations(annotations, classes):
@@ -303,12 +320,13 @@ def calculate_mean_ap(annotations, dataset, video_name):
         metric_map_50.update(annotations[model], dataset_annotations)
         map_metrics = metric_map.compute()
         map_metrics_50 = metric_map_50.compute()
-        for class_mean_ap, class_id in zip(map_metrics['map_per_class'], map_metrics['classes']):
-            class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
-            mean_ap[model]['class_map'][class_name] = class_mean_ap.item() * 100
-        for class_mean_ap, class_id in zip(map_metrics_50['map_per_class'], map_metrics_50['classes']):
-            class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
-            mean_ap[model]['class_map_50'][class_name] = class_mean_ap.item() * 100
+        if model in ['rcnn', 'yolo_detection']:
+            for class_mean_ap, class_id in zip(map_metrics['map_per_class'], map_metrics['classes']):
+                class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
+                mean_ap[model]['class_map'][class_name] = class_mean_ap.item() * 100
+            for class_mean_ap, class_id in zip(map_metrics_50['map_per_class'], map_metrics_50['classes']):
+                class_name = dataset[video_name]['class_names'][dataset[video_name]['classes'].index(class_id)]
+                mean_ap[model]['class_map_50'][class_name] = class_mean_ap.item() * 100
         model_map_50 = map_metrics['map_50'].item()
         model_map = map_metrics['map'].item()
         mean_ap[model]['map_50'] = model_map_50 * 100
@@ -420,10 +438,10 @@ def get_metrics(decod_dir: str,
                         yolo_detection_output = forward_yolo(yolo_detection, image, labels_start_index)
                         annotations['rcnn'].append(rcnn_output)
                         annotations['yolo_detection'].append(yolo_detection_output)
-                    elif "license_detection" in annotation_types:
+                    if "license_detection" in annotation_types:
                         yolo_lp_detection_output = forward_yolo(yolo_lp_detection, image, 0)
                         annotations['yolo_lp_detection'].append(yolo_lp_detection_output)
-                    elif "license_recognition" in annotation_types:
+                    if "license_recognition" in annotation_types:
                         boxes = dataset[video_folder.name]["annotations"]["license_recognition"][i]["boxes"]
                         ocr_result = forward_ocr(ocr, image, boxes)
                         annotations['ocr_result'].append(ocr_result)
@@ -435,7 +453,8 @@ def get_metrics(decod_dir: str,
                 delete_unsupported_annotations(annotations, dataset[video_folder.name]['classes'])
 
                 print(f'\t\tCalculate metrics')
-                mean_ap, ocr_results, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name, use_ms_ssim)
+                mean_ap, ocr_results, psnr, ssim = calculate_metrics(dataset, images, annotations, video_folder.name,
+                                                                     use_ms_ssim)
                 metrics_info = dict(
                     mean_ap=mean_ap,
                     ocr_results=ocr_results,
@@ -453,7 +472,7 @@ def get_metrics(decod_dir: str,
     return metrics
 
 
-def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
+def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool, compare_gop: bool, lang: str):
     codecs = sorted(list(metrics.keys()))
     videos = sorted(list(metrics[codecs[0]].keys()))
     os.makedirs(out_path, exist_ok=True)
@@ -461,47 +480,85 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
     for video in videos:
         detection_models = sorted(list(metrics[codecs[0]][video][0]['mean_ap'].keys()))
         for detection_model in detection_models:
+            gop_count = 0
+            color_count = -1
+            previous_codec = ''
             plt.figure(figsize=(16, 9))
             orig_map = dataset[video]['mean_ap'][detection_model]['map_50']
             map_loss_1 = orig_map - 1
             map_loss_2 = orig_map - 2
             plt.axhline(y=orig_map, color='k', linestyle='dashed',
-                        label=f'Original performance ({orig_map:.2f}%)')
-            plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label='1% mAP loss')
-            plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label='2% mAP loss')
+                        label=labels[lang]['orig_performance'].format(orig_map))
+            plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label=labels[lang]['loss_1'])
+            plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label=labels[lang]['loss_2'])
             for codec in codecs:
                 bpps = [info['bpp'] for info in metrics[codec][video]]
                 maps = [info['mean_ap'][detection_model]['map_50'] for info in metrics[codec][video]]
                 x = np.array(bpps)
                 y = np.array(maps)
-                plt.plot(x, y, 'o-', label=codec)
+                if compare_gop:
+                    codec_unique_name = codec.split('gop')[0].strip()
+                    if codec_unique_name != previous_codec:
+                        gop_count = 0
+                        color_count += 1
+                        previous_codec = codec_unique_name
+                    style = line_styles[gop_count]
+                    color = line_colors[color_count]
+                    codec_gop = metrics[codec][video][0]['gop']
+                    codec_name = codec_unique_name + f' gop {codec_gop}'
+                    plt.plot(x, y, style, color=color, label=codec_name)
+                    gop_count += 1
+                else:
+                    plt.plot(x, y, 'o-', label=codec)
+            color_count = -1
+            previous_codec = ''
             plt.legend()
+            plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
             plt.grid()
-            plt.title(f'Object detection performance on {detection_model} for {video}')
+            plt.grid(True, 'minor', linestyle='--', alpha=0.5)
+            plt.title(labels[lang]['obj_performance'].format(detection_model, video))
             plt.xlabel('bpp')
-            plt.ylabel('mAP@0.5 (%)')
-            plt.savefig(os.path.join(out_path, f"detection_0_5_model_{detection_model}_{video}.png"))
+            plt.ylabel('mAP@0.5, %')
+            plt.savefig(os.path.join(out_path, f"detection_0_5_model_{detection_model}_{video}.png"),
+                        bbox_inches='tight')
 
             plt.figure(figsize=(16, 9))
             orig_map = dataset[video]['mean_ap'][detection_model]['map']
             map_loss_1 = orig_map - 1
             map_loss_2 = orig_map - 2
             plt.axhline(y=orig_map, color='k', linestyle='dashed',
-                        label=f'Original performance ({orig_map:.2f}%)')
-            plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label='1% mAP loss')
-            plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label='2% mAP loss')
+                        label=labels[lang]['orig_performance'].format(orig_map))
+            plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label=labels[lang]['loss_1'])
+            plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label=labels[lang]['loss_2'])
             for codec in codecs:
                 bpps = [info['bpp'] for info in metrics[codec][video]]
                 maps = [info['mean_ap'][detection_model]['map'] for info in metrics[codec][video]]
                 x = np.array(bpps)
                 y = np.array(maps)
-                plt.plot(x, y, 'o-', label=codec)
+                if compare_gop:
+                    codec_unique_name = codec.split('gop')[0].strip()
+                    if codec_unique_name != previous_codec:
+                        gop_count = 0
+                        color_count += 1
+                        previous_codec = codec_unique_name
+                    style = line_styles[gop_count]
+                    color = line_colors[color_count]
+                    codec_gop = metrics[codec][video][0]['gop']
+                    codec_name = codec_unique_name + f' gop {codec_gop}'
+                    plt.plot(x, y, style, color=color, label=codec_name)
+                    gop_count += 1
+                else:
+                    plt.plot(x, y, 'o-', label=codec)
+            color_count = -1
+            previous_codec = ''
             plt.legend()
+            plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
             plt.grid()
-            plt.title(f'Object detection performance on {detection_model} for {video}')
+            plt.grid(True, 'minor', linestyle='--', alpha=0.5)
+            plt.title(labels[lang]['obj_performance'].format(detection_model, video))
             plt.xlabel('bpp')
-            plt.ylabel('mAP (%)')
-            plt.savefig(os.path.join(out_path, f"detection_model_{detection_model}_{video}.png"))
+            plt.ylabel('mAP, %')
+            plt.savefig(os.path.join(out_path, f"detection_model_{detection_model}_{video}.png"), bbox_inches='tight')
 
             class_names = sorted(list(metrics[codecs[0]][video][0]['mean_ap'][detection_model]['class_map'].keys()))
             for class_name in class_names:
@@ -510,21 +567,39 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 map_loss_1 = orig_map - 1
                 map_loss_2 = orig_map - 2
                 plt.axhline(y=orig_map, color='k', linestyle='dashed',
-                            label=f'Original performance ({orig_map:.2f}%)')
-                plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label='1% mAP loss')
-                plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label='2% mAP loss')
+                            label=labels[lang]['orig_performance'].format(orig_map))
+                plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label=labels[lang]['loss_1'])
+                plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label=labels[lang]['loss_2'])
                 for codec in codecs:
                     bpps = [info['bpp'] for info in metrics[codec][video]]
                     maps = [info['mean_ap'][detection_model]['class_map'][class_name] for info in metrics[codec][video]]
                     x = np.array(bpps)
                     y = np.array(maps)
-                    plt.plot(x, y, 'o-', label=codec)
+                    if compare_gop:
+                        codec_unique_name = codec.split('gop')[0].strip()
+                        if codec_unique_name != previous_codec:
+                            gop_count = 0
+                            color_count += 1
+                            previous_codec = codec_unique_name
+                        style = line_styles[gop_count]
+                        color = line_colors[color_count]
+                        codec_gop = metrics[codec][video][0]['gop']
+                        codec_name = codec_unique_name + f' gop {codec_gop}'
+                        plt.plot(x, y, style, color=color, label=codec_name)
+                        gop_count += 1
+                    else:
+                        plt.plot(x, y, 'o-', label=codec)
+                color_count = -1
+                previous_codec = ''
                 plt.legend()
+                plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
                 plt.grid()
-                plt.title(f'Object detection performance for class {class_name} on {detection_model} for {video}')
+                plt.grid(True, 'minor', linestyle='--', alpha=0.5)
+                plt.title(labels[lang]['class_performance'].format(class_name, detection_model, video))
                 plt.xlabel('bpp')
-                plt.ylabel('mAP (%)')
-                plt.savefig(os.path.join(out_path, f"detection_model_{class_name}_{detection_model}_{video}.png"))
+                plt.ylabel('mAP, %')
+                plt.savefig(os.path.join(out_path, f"detection_model_{class_name}_{detection_model}_{video}.png"),
+                            bbox_inches='tight')
 
             for class_name in class_names:
                 plt.figure(figsize=(16, 9))
@@ -532,51 +607,108 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 map_loss_1 = orig_map - 1
                 map_loss_2 = orig_map - 2
                 plt.axhline(y=orig_map, color='k', linestyle='dashed',
-                            label=f'Original performance ({orig_map:.2f}%)')
-                plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label='1% mAP loss')
-                plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label='2% mAP loss')
+                            label=labels[lang]['orig_performance'].format(orig_map))
+                plt.axhline(y=map_loss_1, color='gray', linestyle='dashdot', label=labels[lang]['loss_1'])
+                plt.axhline(y=map_loss_2, color='gray', linestyle='dashdot', label=labels[lang]['loss_2'])
                 for codec in codecs:
                     bpps = [info['bpp'] for info in metrics[codec][video]]
-                    maps = [info['mean_ap'][detection_model]['class_map_50'][class_name] for info in metrics[codec][video]]
+                    maps = [info['mean_ap'][detection_model]['class_map_50'][class_name] for info in
+                            metrics[codec][video]]
                     x = np.array(bpps)
                     y = np.array(maps)
-                    plt.plot(x, y, 'o-', label=codec)
+                    if compare_gop:
+                        codec_unique_name = codec.split('gop')[0].strip()
+                        if codec_unique_name != previous_codec:
+                            gop_count = 0
+                            color_count += 1
+                            previous_codec = codec_unique_name
+                        style = line_styles[gop_count]
+                        color = line_colors[color_count]
+                        codec_gop = metrics[codec][video][0]['gop']
+                        codec_name = codec_unique_name + f' gop {codec_gop}'
+                        plt.plot(x, y, style, color=color, label=codec_name)
+                        gop_count += 1
+                    else:
+                        plt.plot(x, y, 'o-', label=codec)
+                color_count = -1
+                previous_codec = ''
                 plt.legend()
+                plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
                 plt.grid()
-                plt.title(f'Object detection performance for class {class_name} on {detection_model} for {video}')
+                plt.grid(True, 'minor', linestyle='--', alpha=0.5)
+                plt.title(labels[lang]['class_performance'].format(class_name, detection_model, video))
                 plt.xlabel('bpp')
-                plt.ylabel('mAP@0.5 (%)')
-                plt.savefig(os.path.join(out_path, f"detection_0_5_model_{class_name}_{detection_model}_{video}.png"))
+                plt.ylabel('mAP@0.5, %')
+                plt.savefig(os.path.join(out_path, f"detection_0_5_model_{class_name}_{detection_model}_{video}.png"),
+                            bbox_inches='tight')
 
         matchers = sorted(list(metrics[codecs[0]][video][0]['ocr_results'].keys()))
         for matcher in matchers:
+            gop_count = 0
+            color_count = -1
+            previous_codec = ''
             plt.figure(figsize=(16, 9))
             for codec in codecs:
                 bpps = [info['bpp'] for info in metrics[codec][video]]
                 match_values = [info['ocr_results'][matcher] for info in metrics[codec][video]]
                 x = np.array(bpps)
                 y = np.array(match_values)
-                plt.plot(x, y, 'o-', label=codec)
+                if compare_gop:
+                    codec_unique_name = codec.split('gop')[0].strip()
+                    if codec_unique_name != previous_codec:
+                        gop_count = 0
+                        color_count += 1
+                        previous_codec = codec_unique_name
+                    style = line_styles[gop_count]
+                    color = line_colors[color_count]
+                    codec_gop = metrics[codec][video][0]['gop']
+                    codec_name = codec_unique_name + f' gop {codec_gop}'
+                    plt.plot(x, y, style, color=color, label=codec_name)
+                    gop_count += 1
+                else:
+                    plt.plot(x, y, 'o-', label=codec)
             plt.legend()
+            plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
             plt.grid()
-            plt.title(f'Text matching on {matcher} for {video}')
+            plt.grid(True, 'minor', linestyle='--', alpha=0.5)
+            plt.title(labels[lang]['matching'].format(matcher, video))
             plt.xlabel('bpp')
-            plt.ylabel('Metric value, %')
-            plt.savefig(os.path.join(out_path, f"text_match_{matcher}_{video}.png"))
+            plt.ylabel(labels[lang]['matching_value'])
+            plt.savefig(os.path.join(out_path, f"text_match_{matcher}_{video}.png"), bbox_inches='tight')
 
+        gop_count = 0
+        color_count = -1
+        previous_codec = ''
         plt.figure(figsize=(16, 9))
         for codec in codecs:
             bpps = [info['bpp'] for info in metrics[codec][video]]
             psnrs = [info['psnr'] for info in metrics[codec][video]]
             x = np.array(bpps)
             y = np.array(psnrs)
-            plt.plot(x, y, 'o-', label=codec)
+            if compare_gop:
+                codec_unique_name = codec.split('gop')[0].strip()
+                if codec_unique_name != previous_codec:
+                    gop_count = 0
+                    color_count += 1
+                    previous_codec = codec_unique_name
+                style = line_styles[gop_count]
+                color = line_colors[color_count]
+                codec_gop = metrics[codec][video][0]['gop']
+                codec_name = codec_unique_name + f' gop {codec_gop}'
+                plt.plot(x, y, style, color=color, label=codec_name)
+                gop_count += 1
+            else:
+                plt.plot(x, y, 'o-', label=codec)
+        color_count = -1
+        previous_codec = ''
         plt.legend()
+        plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
         plt.grid()
-        plt.title(f'Rate and distortion curves (PSNR) for {video}')
+        plt.grid(True, 'minor', linestyle='--', alpha=0.5)
+        plt.title(labels[lang]['rd_curve_psnr'].format(video))
         plt.xlabel('bpp')
-        plt.ylabel('PSNR (db)')
-        plt.savefig(os.path.join(out_path, f"psnr_{video}.png"))
+        plt.ylabel(labels[lang]['rd_metric_psnr'])
+        plt.savefig(os.path.join(out_path, f"psnr_{video}.png"), bbox_inches='tight')
 
         if use_ms_ssim:
             plt.figure(figsize=(16, 9))
@@ -585,13 +717,28 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
                 ssims = [info['ssim'] for info in metrics[codec][video]]
                 x = np.array(bpps)
                 y = np.array(ssims)
-                plt.plot(x, y, 'o-', label=codec)
+                if compare_gop:
+                    codec_unique_name = codec.split('gop')[0].strip()
+                    if codec_unique_name != previous_codec:
+                        gop_count = 0
+                        color_count += 1
+                        previous_codec = codec_unique_name
+                    style = line_styles[gop_count]
+                    color = line_colors[color_count]
+                    codec_gop = metrics[codec][video][0]['gop']
+                    codec_name = codec_unique_name + f' gop {codec_gop}'
+                    plt.plot(x, y, style, color=color, label=codec_name)
+                    gop_count += 1
+                else:
+                    plt.plot(x, y, 'o-', label=codec)
             plt.legend()
+            plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
             plt.grid()
-            plt.title(f'Rate and distortion curves (MS_SSIM) for {video}')
+            plt.grid(True, 'minor', linestyle='--', alpha=0.5)
+            plt.title(labels[lang]['rd_curve_ssim'].format(video))
             plt.xlabel('bpp')
             plt.ylabel('MS-SSIM')
-            plt.savefig(os.path.join(out_path, f"ms-ssim_{video}.png"))
+            plt.savefig(os.path.join(out_path, f"ms-ssim_{video}.png"), bbox_inches='tight')
 
         for codec in codecs:
             plot_flag = True
@@ -610,11 +757,13 @@ def plot_graphs(metrics, dataset, out_path: str, use_ms_ssim: bool):
             if plot_flag:
                 plt.yscale('log')
                 plt.legend()
+                plt.gca().xaxis.set_minor_locator(AutoMinorLocator(4))
                 plt.grid()
-                plt.title(f'Bpp per frame for codec {codec} and video {video}')
+                plt.grid(True, 'minor', linestyle='--', alpha=0.5)
+                plt.title(labels[lang]['bbp_per_frame'].format(codec, video))
                 plt.xlabel('frame')
                 plt.ylabel('bpp')
-                plt.savefig(os.path.join(out_path, f"bpp_{codec}_{video}.png"))
+                plt.savefig(os.path.join(out_path, f"bpp_{codec}_{video}.png"), bbox_inches='tight')
 
 
 def main():
@@ -655,7 +804,7 @@ def main():
                           config["ms_ssim"],
                           config["labels_start_index"])
 
-    plot_graphs(metrics, dataset, config["out_path"], config["ms_ssim"])
+    plot_graphs(metrics, dataset, config["out_path"], config["ms_ssim"], config["compare_gop"], config["language"])
 
 
 if __name__ == "__main__":
